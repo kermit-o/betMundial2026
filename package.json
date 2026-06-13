@@ -1,0 +1,24 @@
+{
+  "name": "bet-mundial-2026",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Plataforma web de apuestas para el Mundial 2026 — estabilidad, cumplimiento normativo, baja latencia y antifraude.",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,magenta \"npm run dev -w server\" \"npm run dev -w web\"",
+    "build": "npm run build -w server && npm run build -w web",
+    "start": "npm run start -w server",
+    "test": "npm run test -w server",
+    "seed": "npm run seed -w server",
+    "lint": "npm run lint -w server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
