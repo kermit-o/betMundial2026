@@ -8,7 +8,24 @@ cuatro prioridades de producto:
 | **Estabilidad** | Operaciones financieras atómicas (transacciones SQLite), validación de entrada con Zod en todos los endpoints, manejo de errores centralizado, apagado controlado (graceful shutdown) y suite de pruebas automatizadas. |
 | **Cumplimiento normativo** | Motor de reglas por jurisdicción (edad mínima, moneda, impuestos, límites), verificación KYC, bloqueo geográfico, juego responsable (límites de depósito/pérdida, autoexclusión) y registro de auditoría inmutable. |
 | **Baja latencia** | Base de datos en proceso `better-sqlite3` (lecturas/escrituras sub‑milisegundo), sentencias preparadas, cuotas en memoria y **push de cuotas en vivo por WebSocket** (sin polling). |
-| **Protección antifraude** | Rate limiting por IP, control de velocidad de apuestas, *risk scoring* multiseñal (stake, cuotas extremas, multicuenta por IP, cuentas nuevas), detección AML de transacciones grandes y bloqueo automático de apuestas de alto riesgo. |
+| **Protección antifraude** | Rate limiting por IP (ámbitos separados), control de velocidad de apuestas, *risk scoring* multiseñal (stake, cuotas extremas, multicuenta por IP, cuentas nuevas), detección AML de transacciones grandes y bloqueo automático de apuestas de alto riesgo. |
+
+### Funcionalidades de producto
+
+- **Apuestas simples y combinadas (acumuladas)**: boletos de 1 a 12 selecciones,
+  con cuota total = producto de cuotas y regla anti‑correlación (no se combinan
+  dos selecciones del mismo partido). Las anuladas (*void*) cuentan como cuota 1.
+- **Cash‑out**: cierre anticipado de apuestas abiertas a valor justo según las
+  cuotas en vivo, con margen del operador.
+- **Panel de administración** (rol admin): liquidar partidos, suspender/abrir
+  mercados, tablero de banderas de fraude, registro de auditoría, gestión de
+  usuarios y forzado de KYC, con métricas de exposición.
+- **Proveedores pluggable**: interfaces `PaymentProvider` y `KycProvider` con
+  implementación *sandbox* intercambiable. Depósitos idempotentes y webhooks
+  de pago firmados.
+- **Seguridad y juego responsable**: verificación de email, restablecimiento de
+  contraseña, **MFA (TOTP)**, *reality checks* de sesión y límites con
+  enfriamiento de 24h en las subidas.
 
 > ⚠️ **Aviso**: proyecto de demostración técnica. El motor de pagos, la pasarela
 > bancaria y la verificación KYC están **simulados**. Antes de operar dinero real
@@ -105,23 +122,33 @@ docker compose up --build     # API en :4000, web servida en :8080
 | PUT  | `/api/me/limits/deposit` | JWT | Límite de depósito diario |
 | PUT  | `/api/me/limits/loss` | JWT | Límite de pérdida diaria |
 | POST | `/api/me/self-exclude` | JWT | Autoexclusión (juego responsable) |
-| GET  | `/api/wallet` | JWT | Saldo + movimientos |
-| POST | `/api/wallet/deposit` | JWT | Depósito (valida límite diario) |
+| GET  | `/api/me/reality-check` | JWT | Resumen de actividad de la sesión |
+| POST | `/api/me/mfa/setup` · `enable` · `disable` | JWT | Gestión de MFA (TOTP) |
+| POST | `/api/me/email/verify-request` | JWT | Solicitar verificación de email |
+| POST | `/api/auth/forgot-password` · `reset-password` · `verify-email` | — | Recuperación de cuenta |
+| GET  | `/api/wallet` | JWT | Saldo, movimientos y pagos |
+| POST | `/api/wallet/deposit` | JWT | Depósito (idempotente, vía proveedor) |
 | POST | `/api/wallet/withdraw` | JWT | Retiro (requiere KYC) |
-| POST | `/api/bets` | JWT | Colocar apuesta (cumplimiento + antifraude) |
-| GET  | `/api/bets` | JWT | Historial de apuestas |
+| POST | `/api/webhooks/payments` | firma | Confirmación de pago del proveedor |
+| POST | `/api/bets` | JWT | Colocar apuesta simple o combinada |
+| GET  | `/api/bets` | JWT | Historial (con patas y valor de cash‑out) |
+| POST | `/api/bets/:id/cashout` | JWT | Cash‑out de una apuesta abierta |
+| GET  | `/api/admin/stats` · `fraud-flags` · `audit` · `users` | JWT admin | Tableros de administración |
 | POST | `/api/admin/matches/:id/settle` | JWT admin | Liquidar partido y pagar premios |
+| POST | `/api/admin/markets/:id/status` | JWT admin | Suspender / abrir un mercado |
+| POST | `/api/admin/users/:id/kyc` | JWT admin | Forzar estado KYC de un usuario |
 
-### Ejemplo: colocar una apuesta
+### Ejemplo: colocar una apuesta (simple o combinada)
 
 ```bash
 curl -X POST http://localhost:4000/api/bets \
   -H "Authorization: Bearer <JWT>" -H "Content-Type: application/json" \
-  -d '{"selectionId":"<id>","stake":5000,"expectedOdds":2.1}'
+  -d '{"legs":[{"selectionId":"<id1>","expectedOdds":2.1},{"selectionId":"<id2>","expectedOdds":1.8}],"stake":5000}'
 ```
 
-`stake` en minor units (5000 = 50,00 €). `expectedOdds` protege al usuario: si la
-cuota se ha movido, el servidor rechaza con `odds_changed` y el cliente revalida.
+`stake` en minor units (5000 = 50,00 €). Una sola pata = apuesta simple; varias =
+combinada. `expectedOdds` por pata protege al usuario: si una cuota se ha movido,
+el servidor rechaza con `odds_changed` y el cliente revalida.
 
 ---
 

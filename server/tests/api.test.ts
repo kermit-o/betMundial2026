@@ -81,7 +81,7 @@ describe('API e2e', () => {
     const blocked = await request(app)
       .post('/api/bets')
       .set('Authorization', `Bearer ${token}`)
-      .send({ selectionId: selection.id, stake: 5_000, expectedOdds: selection.odds });
+      .send({ legs: [{ selectionId: selection.id, expectedOdds: selection.odds }], stake: 5_000 });
     expect(blocked.status).toBe(403);
     expect(blocked.body.error.code).toBe('kyc_required');
 
@@ -96,14 +96,14 @@ describe('API e2e', () => {
     const ok = await request(app)
       .post('/api/bets')
       .set('Authorization', `Bearer ${token}`)
-      .send({ selectionId: selection.id, stake: 5_000, expectedOdds: selection.odds });
+      .send({ legs: [{ selectionId: selection.id, expectedOdds: selection.odds }], stake: 5_000 });
     expect(ok.status).toBe(201);
     expect(ok.body.bet.stake).toBe(5_000);
     expect(ok.body.balance).toBe(15_000);
   });
 
   it('requiere autenticación para apostar', async () => {
-    const res = await request(app).post('/api/bets').send({ selectionId: 'x', stake: 1, expectedOdds: 1 });
+    const res = await request(app).post('/api/bets').send({ legs: [{ selectionId: 'x', expectedOdds: 1 }], stake: 1 });
     expect(res.status).toBe(401);
   });
 });

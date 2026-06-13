@@ -12,17 +12,23 @@ export const registerSchema = z.object({
 export const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+  mfaCode: z.string().min(6).max(8).optional(),
 });
 
 export const amountSchema = z.object({
   // Importe en minor units (entero, céntimos).
   amount: z.number().int().positive(),
+  idempotencyKey: z.string().min(8).max(100).optional(),
+});
+
+export const legSchema = z.object({
+  selectionId: z.string().min(1),
+  expectedOdds: z.number().positive(),
 });
 
 export const placeBetSchema = z.object({
-  selectionId: z.string().min(1),
+  legs: z.array(legSchema).min(1).max(12),
   stake: z.number().int().positive(),
-  expectedOdds: z.number().positive(),
 });
 
 export const kycSchema = z.object({
@@ -39,3 +45,14 @@ export const settleSchema = z.object({
   homeScore: z.number().int().min(0).max(50),
   awayScore: z.number().int().min(0).max(50),
 });
+
+// --- Seguridad de cuenta ---
+export const forgotPasswordSchema = z.object({ email: z.string().email() });
+export const resetPasswordSchema = z.object({ token: z.string().min(10), newPassword: z.string().min(8).max(128) });
+export const verifyEmailSchema = z.object({ token: z.string().min(10) });
+export const mfaEnableSchema = z.object({ code: z.string().min(6).max(8) });
+export const mfaDisableSchema = z.object({ code: z.string().min(6).max(8) });
+
+// --- Admin ---
+export const marketStatusSchema = z.object({ status: z.enum(['open', 'suspended']) });
+export const forceKycSchema = z.object({ status: z.enum(['verified', 'rejected', 'pending']) });

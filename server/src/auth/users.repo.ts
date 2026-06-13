@@ -12,11 +12,13 @@ export function findUserById(db: Database.Database, id: string): User | undefine
 export function insertUser(db: Database.Database, user: User): void {
   db.prepare(
     `INSERT INTO users (id, email, password_hash, full_name, date_of_birth, jurisdiction,
-       currency, role, kyc_status, self_excluded_until, daily_deposit_limit, daily_loss_limit,
-       terms_accepted_at, signup_ip, created_at)
+       currency, role, kyc_status, email_verified, mfa_enabled, mfa_secret, self_excluded_until,
+       daily_deposit_limit, daily_loss_limit, pending_deposit_limit, pending_deposit_effective,
+       pending_loss_limit, pending_loss_effective, terms_accepted_at, signup_ip, created_at)
      VALUES (@id, @email, @password_hash, @full_name, @date_of_birth, @jurisdiction,
-       @currency, @role, @kyc_status, @self_excluded_until, @daily_deposit_limit, @daily_loss_limit,
-       @terms_accepted_at, @signup_ip, @created_at)`,
+       @currency, @role, @kyc_status, @email_verified, @mfa_enabled, @mfa_secret, @self_excluded_until,
+       @daily_deposit_limit, @daily_loss_limit, @pending_deposit_limit, @pending_deposit_effective,
+       @pending_loss_limit, @pending_loss_effective, @terms_accepted_at, @signup_ip, @created_at)`,
   ).run(user);
 }
 

@@ -8,6 +8,7 @@ import { audit } from '../utils/audit.js';
 import { meetsMinAge } from '../compliance/compliance.service.js';
 import { getJurisdictionRule, isJurisdictionAllowed } from '../compliance/jurisdictions.js';
 import { createWallet, findUserByEmail, insertUser } from './users.repo.js';
+import { verifyTotp } from './totp.js';
 
 export interface RegisterInput {
   email: string;
@@ -49,9 +50,16 @@ export function register(db: Database.Database, input: RegisterInput, ip: string
     currency: rule.currency,
     role: 'user',
     kyc_status: 'pending',
+    email_verified: 0,
+    mfa_enabled: 0,
+    mfa_secret: null,
     self_excluded_until: null,
     daily_deposit_limit: rule.defaultDailyDepositLimit,
     daily_loss_limit: null,
+    pending_deposit_limit: null,
+    pending_deposit_effective: null,
+    pending_loss_limit: null,
+    pending_loss_effective: null,
     terms_accepted_at: now,
     signup_ip: ip,
     created_at: now.slice(0, 19).replace('T', ' '),
@@ -67,7 +75,13 @@ export function register(db: Database.Database, input: RegisterInput, ip: string
   return { user, token: issueToken(user) };
 }
 
-export function login(db: Database.Database, email: string, password: string, ip: string | null): { user: User; token: string } {
+export function login(
+  db: Database.Database,
+  email: string,
+  password: string,
+  ip: string | null,
+  mfaCode?: string,
+): { user: User; token: string } {
   const user = findUserByEmail(db, email);
   // Comparación en tiempo (casi) constante: ejecutamos bcrypt aunque no exista.
   const ok = user
@@ -76,6 +90,14 @@ export function login(db: Database.Database, email: string, password: string, ip
   if (!user || !ok) {
     audit(db, 'login_failed', { detail: { email }, ip });
     throw new AppError(401, 'invalid_credentials', 'Credenciales incorrectas.');
+  }
+  // Segundo factor: si el usuario tiene MFA activo, exigir un TOTP válido.
+  if (user.mfa_enabled && user.mfa_secret) {
+    if (!mfaCode) throw new AppError(401, 'mfa_required', 'Introduzca el código de verificación (MFA).');
+    if (!verifyTotp(user.mfa_secret, mfaCode)) {
+      audit(db, 'mfa_failed', { userId: user.id, ip });
+      throw new AppError(401, 'mfa_invalid', 'Código MFA incorrecto.');
+    }
   }
   audit(db, 'login', { userId: user.id, ip });
   return { user, token: issueToken(user) };

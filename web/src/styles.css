@@ -149,3 +149,49 @@ button.link { background: none; border: 0; color: var(--accent); text-decoration
   .tabs { overflow-x: auto; }
   .form-grid { grid-template-columns: 1fr; }
 }
+
+/* --- Combinadas / boleto extendido --- */
+.combo-tag { font-size: .72rem; background: rgba(79,124,255,.18); color: #a8bcff; padding: 2px 8px; border-radius: 10px; margin-left: 6px; }
+.slip-footer { display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--line); padding-top: 10px; margin-top: 6px; }
+.betslip .slip-item { border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-bottom: 8px; }
+.link.remove { color: var(--danger); align-self: flex-start; }
+.suspended { color: var(--warn); }
+
+/* --- Lista de apuestas --- */
+.bets-list { display: flex; flex-direction: column; gap: 12px; }
+.bet-row { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; }
+.bet-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: .85rem; }
+.bet-type { color: var(--muted); }
+.bet-odds { font-weight: 700; }
+.bet-date { color: var(--muted); margin-left: auto; font-size: .78rem; }
+.legs { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.leg { display: flex; justify-content: space-between; font-size: .85rem; padding: 4px 8px; border-radius: 6px; background: var(--card); }
+.leg.won { border-left: 3px solid var(--primary); }
+.leg.lost { border-left: 3px solid var(--danger); }
+.leg.void { border-left: 3px solid var(--muted); }
+.leg-odds { color: var(--muted); }
+.bet-foot { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; font-size: .88rem; }
+.cashout-btn { margin-left: auto; background: var(--accent); color: #fff; border: 0; padding: 8px 14px; border-radius: 8px; font-weight: 600; }
+.cashout-btn:disabled { opacity: .6; }
+.badge.cashed_out { background: rgba(79,124,255,.16); color: #a8bcff; }
+
+/* --- Reality check --- */
+.banner.reality { background: rgba(79,124,255,.14); color: #c3d0ff; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+
+/* --- MFA --- */
+.mfa-secret { display: inline-block; background: var(--bg-2); padding: 8px 12px; border-radius: 8px; letter-spacing: 2px; font-size: 1rem; }
+
+/* --- Admin --- */
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.stat { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; display: flex; flex-direction: column; gap: 4px; }
+.stat span { color: var(--muted); font-size: .8rem; }
+.stat strong { font-size: 1.4rem; }
+.admin-tabs { max-width: 420px; }
+.admin-matches { display: flex; flex-direction: column; gap: 10px; }
+.admin-match { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; }
+.admin-match-head { display: flex; justify-content: space-between; align-items: center; }
+.settle-row { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+.admin-markets { display: flex; gap: 12px; flex-wrap: wrap; font-size: .82rem; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78rem; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge.scheduled { background: rgba(138,150,179,.16); color: var(--muted); }
+.badge.finished { background: rgba(22,199,132,.16); color: var(--primary); }

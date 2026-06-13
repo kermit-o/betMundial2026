@@ -1,14 +1,11 @@
 import type Database from 'better-sqlite3';
-import { AppError, type Bet, type Market, type Selection } from '../types.js';
+import { AppError, type Bet, type BetLeg, type Market, type Selection } from '../types.js';
 import { audit } from '../utils/audit.js';
 import { applyLedgerEntry } from '../wallet/wallet.service.js';
 import { getJurisdictionRule } from '../compliance/jurisdictions.js';
 import { findUserById } from '../auth/users.repo.js';
 
-/**
- * Calcula qué selección de un mercado resulta ganadora según el resultado.
- * Devuelve el nombre de la selección ganadora (o null para mercados anulados).
- */
+/** Selección ganadora de un mercado según el resultado del partido. */
 function winningSelectionName(marketType: string, home: number, away: number): string | null {
   switch (marketType) {
     case '1x2':
@@ -25,8 +22,8 @@ function winningSelectionName(marketType: string, home: number, away: number): s
 }
 
 /**
- * Liquida todos los mercados de un partido finalizado de forma atómica:
- * marca selecciones ganadoras/perdedoras, resuelve apuestas y paga (con impuesto).
+ * Liquida todos los mercados de un partido finalizado: marca selecciones y
+ * patas, y resuelve los boletos (simples y combinados) que queden completos.
  */
 export function settleMatch(
   db: Database.Database,
@@ -34,73 +31,95 @@ export function settleMatch(
   homeScore: number,
   awayScore: number,
 ): { settledBets: number; totalPaidOut: number } {
-  const match = db.prepare(`SELECT * FROM matches WHERE id = ?`).get(matchId) as
-    | { id: string; status: string }
-    | undefined;
+  const match = db.prepare(`SELECT id FROM matches WHERE id = ?`).get(matchId) as { id: string } | undefined;
   if (!match) throw new AppError(404, 'match_not_found', 'Partido no encontrado.');
 
   let settledBets = 0;
   let totalPaidOut = 0;
 
   const run = db.transaction(() => {
-    db.prepare(`UPDATE matches SET status='finished', home_score=?, away_score=? WHERE id=?`).run(
-      homeScore,
-      awayScore,
-      matchId,
-    );
+    db.prepare(`UPDATE matches SET status='finished', home_score=?, away_score=? WHERE id=?`).run(homeScore, awayScore, matchId);
 
     const markets = db.prepare(`SELECT * FROM markets WHERE match_id = ?`).all(matchId) as Market[];
-
     for (const market of markets) {
-      if (market.status === 'settled') continue;
       const winnerName = winningSelectionName(market.type, homeScore, awayScore);
       const selections = db.prepare(`SELECT * FROM selections WHERE market_id = ?`).all(market.id) as Selection[];
-
       for (const sel of selections) {
         const result = winnerName === null ? 'void' : sel.name === winnerName ? 'won' : 'lost';
         db.prepare(`UPDATE selections SET result = ? WHERE id = ?`).run(result, sel.id);
-
-        const bets = db
-          .prepare(`SELECT * FROM bets WHERE selection_id = ? AND status = 'open'`)
-          .all(sel.id) as Bet[];
-
-        for (const bet of bets) {
-          settledBets++;
-          if (result === 'void') {
-            // Reembolso íntegro del stake.
-            applyLedgerEntry(db, bet.user_id, 'refund', bet.stake, bet.id);
-            markBet(db, bet.id, 'void');
-          } else if (result === 'won') {
-            const payout = computeNetPayout(db, bet);
-            totalPaidOut += payout;
-            applyLedgerEntry(db, bet.user_id, 'bet_payout', payout, bet.id);
-            markBet(db, bet.id, 'won');
-          } else {
-            markBet(db, bet.id, 'lost');
-          }
-        }
+        // Propagar el resultado a todas las patas que apostaron esta selección.
+        db.prepare(`UPDATE bet_legs SET result = ? WHERE selection_id = ? AND result = 'pending'`).run(result, sel.id);
       }
       db.prepare(`UPDATE markets SET status='settled' WHERE id = ?`).run(market.id);
     }
 
-    audit(db, 'match_settled', {
-      detail: { matchId, homeScore, awayScore, settledBets, totalPaidOut },
-    });
+    // Boletos afectados por este partido y aún abiertos.
+    const affected = db
+      .prepare(`SELECT DISTINCT bet_id FROM bet_legs WHERE match_id = ?`)
+      .all(matchId) as Array<{ bet_id: string }>;
+
+    for (const { bet_id } of affected) {
+      const outcome = settleBetIfComplete(db, bet_id);
+      if (outcome) {
+        settledBets++;
+        totalPaidOut += outcome.paidOut;
+      }
+    }
+
+    audit(db, 'match_settled', { detail: { matchId, homeScore, awayScore, settledBets, totalPaidOut } });
   });
   run();
 
   return { settledBets, totalPaidOut };
 }
 
-/** Pago neto = pago bruto menos impuesto sobre la ganancia neta de la jurisdicción. */
-function computeNetPayout(db: Database.Database, bet: Bet): number {
-  const user = findUserById(db, bet.user_id);
-  const taxRate = user ? getJurisdictionRule(user.jurisdiction).winningsTaxRate : 0;
-  const grossProfit = bet.potential_payout - bet.stake;
-  const tax = Math.floor(grossProfit * taxRate);
-  return bet.potential_payout - tax;
+/**
+ * Resuelve un boleto si todas sus patas están decididas. Reglas:
+ *  - Alguna pata perdida  → boleto perdido (sin pago).
+ *  - Todas anuladas       → boleto anulado (reembolso del stake).
+ *  - Resto                → ganado: pago = stake × Π(cuotas de patas ganadas)
+ *                           (las anuladas cuentan como cuota 1), menos impuesto.
+ * Devuelve null si el boleto sigue abierto (patas pendientes) o ya estaba cerrado.
+ */
+export function settleBetIfComplete(db: Database.Database, betId: string): { status: Bet['status']; paidOut: number } | null {
+  const bet = db.prepare(`SELECT * FROM bets WHERE id = ?`).get(betId) as Bet | undefined;
+  if (!bet || bet.status !== 'open') return null;
+
+  const legs = db.prepare(`SELECT * FROM bet_legs WHERE bet_id = ?`).all(betId) as BetLeg[];
+  if (legs.some((l) => l.result === 'pending')) return null; // aún no liquidable
+
+  const anyLost = legs.some((l) => l.result === 'lost');
+  const allVoid = legs.every((l) => l.result === 'void');
+
+  if (anyLost) {
+    markBet(db, betId, 'lost', null);
+    return { status: 'lost', paidOut: 0 };
+  }
+
+  if (allVoid) {
+    applyLedgerEntry(db, bet.user_id, 'refund', bet.stake, betId);
+    markBet(db, betId, 'void', null);
+    return { status: 'void', paidOut: 0 };
+  }
+
+  // Ganado: producto de cuotas de patas ganadas (anuladas = 1).
+  const effectiveOdds = legs.reduce((acc, l) => (l.result === 'won' ? acc * l.odds : acc), 1);
+  const grossPayout = Math.floor(bet.stake * effectiveOdds);
+  const netPayout = applyWinningsTax(db, bet.user_id, bet.stake, grossPayout);
+  applyLedgerEntry(db, bet.user_id, 'bet_payout', netPayout, betId);
+  markBet(db, betId, 'won', null);
+  return { status: 'won', paidOut: netPayout };
 }
 
-function markBet(db: Database.Database, betId: string, status: Bet['status']): void {
-  db.prepare(`UPDATE bets SET status = ?, settled_at = datetime('now') WHERE id = ?`).run(status, betId);
+/** Aplica el impuesto sobre la ganancia neta según la jurisdicción del usuario. */
+function applyWinningsTax(db: Database.Database, userId: string, stake: number, grossPayout: number): number {
+  const user = findUserById(db, userId);
+  const taxRate = user ? getJurisdictionRule(user.jurisdiction).winningsTaxRate : 0;
+  const grossProfit = grossPayout - stake;
+  const tax = grossProfit > 0 ? Math.floor(grossProfit * taxRate) : 0;
+  return grossPayout - tax;
+}
+
+function markBet(db: Database.Database, betId: string, status: Bet['status'], cashOutValue: number | null): void {
+  db.prepare(`UPDATE bets SET status = ?, cash_out_value = ?, settled_at = datetime('now') WHERE id = ?`).run(status, cashOutValue, betId);
 }
