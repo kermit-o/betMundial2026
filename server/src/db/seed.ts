@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid';
 import { pathToFileURL } from 'node:url';
 import type { Db, Executor } from './index.js';
 import { getDb, closeDb } from './index.js';
+import { config } from '../config.js';
 import { nowIso } from '../utils/time.js';
 
 interface TeamSeed { code: string; name: string; grp: string }
@@ -30,6 +31,12 @@ function priceFromProb(p: number, margin = 0.07): number {
 }
 
 export async function seed(db: Db): Promise<void> {
+  await seedDemoData(db);
+  await ensureAdmin(db);
+}
+
+/** Datos de demostración (equipos, partidos y mercados). Idempotente. */
+async function seedDemoData(db: Db): Promise<void> {
   const existing = await db.oneOrNone<{ n: number }>(`SELECT COUNT(*)::int AS n FROM matches`);
   if ((existing?.n ?? 0) > 0) {
     console.log('[seed] La base de datos ya contiene partidos; no se vuelve a sembrar.');
@@ -96,20 +103,60 @@ export async function seed(db: Db): Promise<void> {
       ]);
     }
 
-    // Usuario administrador para liquidaciones.
-    const adminId = nanoid();
-    const now = nowIso();
+  });
+
+  console.log(`[seed] Sembrados ${TEAMS.length} equipos, 6 partidos con 3 mercados cada uno.`);
+}
+
+/**
+ * Crea o actualiza el usuario administrador a partir de ADMIN_EMAIL/ADMIN_PASSWORD.
+ * Se ejecuta en cada arranque, de modo que cambiar ADMIN_PASSWORD y redesplegar
+ * rota la contraseña. En producción no hay credenciales por defecto: si no se
+ * configuran, no se crea admin (y se avisa). En desarrollo usa un admin de demo.
+ */
+async function ensureAdmin(db: Db): Promise<void> {
+  const prod = config.env === 'production';
+  let email = config.adminEmail.trim();
+  let password = config.adminPassword;
+
+  if (!email || !password) {
+    if (prod) {
+      console.warn(
+        '[seed] ADMIN_EMAIL/ADMIN_PASSWORD no configurados: no se crea ni rota el administrador. ' +
+          'Define ambas variables y vuelve a desplegar para crear o cambiar la contraseña del admin.',
+      );
+      return;
+    }
+    email = email || 'admin@betmundial2026.test';
+    password = password || 'Admin1234!';
+    console.warn(`[seed] Admin de demostración (solo desarrollo): ${email} / ${password}`);
+  }
+
+  if (prod && password.length < 8) {
+    throw new Error('ADMIN_PASSWORD debe tener al menos 8 caracteres en producción.');
+  }
+
+  const normalizedEmail = email.toLowerCase();
+  const hash = bcrypt.hashSync(password, 10);
+  const found = await db.oneOrNone<{ id: string }>(`SELECT id FROM users WHERE email = $1`, [normalizedEmail]);
+  if (found) {
+    await db.none(`UPDATE users SET password_hash = $2, role = 'admin' WHERE id = $1`, [found.id, hash]);
+    console.log(`[seed] Administrador actualizado: ${normalizedEmail}`);
+    return;
+  }
+
+  const adminId = nanoid();
+  const now = nowIso();
+  await db.tx(async (t: Executor) => {
     await t.none(
       `INSERT INTO users (id, email, password_hash, full_name, date_of_birth, jurisdiction, currency,
         role, kyc_status, email_verified, daily_deposit_limit, terms_accepted_at, created_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,'admin','verified',1,1000000,$8,$8)`,
-      [adminId, 'admin@betmundial2026.test', bcrypt.hashSync('Admin1234!', 10), 'Administrador', '1980-01-01', 'ES', 'EUR', now],
+      [adminId, normalizedEmail, hash, 'Administrador', '1980-01-01', 'ES', 'EUR', now],
     );
     await t.none(`INSERT INTO wallets (user_id, balance, currency) VALUES ($1, 0, 'EUR')`, [adminId]);
   });
-
-  console.log(`[seed] Sembrados ${TEAMS.length} equipos, 6 partidos con 3 mercados cada uno y 1 usuario admin.`);
-  console.log('[seed] Admin: admin@betmundial2026.test / Admin1234!');
+  console.log(`[seed] Administrador creado: ${normalizedEmail}`);
 }
 
 // Permite ejecutar como script: `npm run seed`.

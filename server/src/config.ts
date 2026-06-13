@@ -54,6 +54,11 @@ export const config = {
   trustProxy: int('TRUST_PROXY', 0),
   metricsEnabled: str('METRICS_ENABLED', 'true') !== 'false',
   paymentsWebhookSecret: str('PAYMENTS_WEBHOOK_SECRET', 'sandbox-webhook-secret'),
+
+  // Bootstrap del administrador: si ambas se definen, el arranque crea o rota el
+  // admin con estas credenciales (no hay contraseñas por defecto en producción).
+  adminEmail: str('ADMIN_EMAIL', ''),
+  adminPassword: process.env.ADMIN_PASSWORD ?? '',
 } as const;
 
 export const isProd = config.env === 'production';
@@ -79,5 +84,11 @@ export function assertProductionConfig(): void {
   }
   if (errors.length > 0) {
     throw new Error('Configuración de producción inválida:\n - ' + errors.join('\n - '));
+  }
+  if (!config.adminEmail || !config.adminPassword) {
+    // No bloquea el arranque, pero avisa: sin esto no hay administrador seguro.
+    process.stderr.write(
+      '[config] Aviso: ADMIN_EMAIL/ADMIN_PASSWORD no configurados; no se creará/rotará el administrador.\n',
+    );
   }
 }

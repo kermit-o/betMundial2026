@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { nanoid } from 'nanoid';
 import { config } from '../config.js';
+import { logger } from '../utils/logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -78,11 +79,31 @@ export async function applySchema(db: Db): Promise<void> {
   await db.none(SCHEMA_SQL);
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export async function getDb(): Promise<Db> {
   if (instance) return instance;
   const pool = new pg.Pool({ connectionString: config.databaseUrl, max: config.databasePoolMax });
-  instance = new PgDb(pool);
-  await applySchema(instance);
+  const db = new PgDb(pool);
+  // La base de datos puede no estar lista en el primer intento (arranque en frío
+  // del contenedor de Postgres). Reintentamos con backoff exponencial en lugar de
+  // abortar el proceso, que provocaría un crash-loop del servicio.
+  const maxAttempts = 10;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await applySchema(db);
+      break;
+    } catch (err) {
+      if (attempt >= maxAttempts) {
+        await pool.end().catch(() => undefined);
+        throw err;
+      }
+      const waitMs = Math.min(1000 * 2 ** (attempt - 1), 10_000);
+      logger.warn('db_connect_retry', { attempt, maxAttempts, waitMs, error: String(err) });
+      await sleep(waitMs);
+    }
+  }
+  instance = db;
   return instance;
 }
 

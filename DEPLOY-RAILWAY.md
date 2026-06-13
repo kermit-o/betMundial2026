@@ -34,6 +34,8 @@ En el servicio web → **Variables** → añade:
 | `JWT_SECRET` | *(cadena aleatoria ≥ 32 caracteres)* | Ver abajo |
 | `PAYMENTS_WEBHOOK_SECRET` | *(cadena aleatoria)* | Distinta del valor sandbox |
 | `CORS_ORIGINS` | `https://TU-DOMINIO.up.railway.app` | Ver paso 4 |
+| `ADMIN_EMAIL` | `admin@tudominio.com` | Crea/rota el administrador |
+| `ADMIN_PASSWORD` | *(contraseña fuerte, ≥ 8)* | Cambiarla y redesplegar la rota |
 | `TRUST_PROXY` | `1` | Railway está detrás de un proxy |
 | `ALLOWED_JURISDICTIONS` | `ES,MX,CO,PE,AR,CL,UK,MT` | Ajusta a tus mercados |
 | `LOG_LEVEL` | `info` | opcional |
@@ -70,8 +72,14 @@ Abre `https://TU-DOMINIO.up.railway.app/` en el navegador: debe cargar la
 plataforma. Las cuotas en vivo (WebSocket) funcionan en el mismo dominio.
 
 ### 6. Acceso de administración
-Admin sembrado: `admin@betmundial2026.test` / `Admin1234!`.
-**Cambia esa contraseña** (o crea tu propio admin) antes de usarlo de verdad.
+El administrador se crea a partir de `ADMIN_EMAIL` / `ADMIN_PASSWORD`. En
+producción **no hay credenciales por defecto**: define ambas variables y
+redespliega para crear el admin (o para **rotar su contraseña** — basta con
+cambiar `ADMIN_PASSWORD` y volver a desplegar).
+
+> Si en un despliegue anterior quedó el admin de demostración
+> (`admin@betmundial2026.test` / `Admin1234!`), pon `ADMIN_EMAIL=admin@betmundial2026.test`
+> y un `ADMIN_PASSWORD` fuerte, y redespliega: rotará esa misma cuenta.
 
 ---
 
