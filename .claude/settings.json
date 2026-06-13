@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ ! -d node_modules ]; then npm install; fi; if [ ! -f .env ]; then cp .env.example .env; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

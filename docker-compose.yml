@@ -1,0 +1,29 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      JWT_SECRET: ${JWT_SECRET:-cambia-esto-en-produccion-por-un-secreto-fuerte}
+      DATABASE_PATH: /data/bet.db
+      ALLOWED_JURISDICTIONS: ES,MX,CO,PE,AR,CL,UK,MT
+    volumes:
+      - bet_data:/data
+    ports:
+      - "4000:4000"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+
+volumes:
+  bet_data:
