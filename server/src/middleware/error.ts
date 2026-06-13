@@ -2,9 +2,11 @@ import type { NextFunction, Request, Response } from 'express';
 import { ZodError } from 'zod';
 import { AppError } from '../types.js';
 import { isProd } from '../config.js';
+import { logger } from '../utils/logger.js';
+import { incCounter } from '../observability/metrics.js';
 
 /** Handler de errores centralizado: respuestas consistentes y sin filtrar internals. */
-export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction): void {
+export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction): void {
   if (err instanceof AppError) {
     res.status(err.httpStatus).json({ error: { code: err.code, message: err.message } });
     return;
@@ -15,8 +17,9 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     });
     return;
   }
-  // Error inesperado: log interno, respuesta genérica.
-  console.error('[error]', err);
+  // Error inesperado: log estructurado, métrica y respuesta genérica.
+  incCounter('bet_http_unhandled_errors_total');
+  logger.error('unhandled_error', { reqId: req.id, path: req.originalUrl, error: String((err as Error)?.stack ?? err) });
   res.status(500).json({
     error: {
       code: 'internal_error',

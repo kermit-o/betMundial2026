@@ -19,8 +19,20 @@ jobs:
       - name: Instalar dependencias
         run: npm install
 
+      - name: Typecheck (server)
+        run: npm run lint -w server
+
       - name: Compilar (server + web)
         run: npm run build
 
       - name: Pruebas del backend
         run: npm test
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build de la imagen del API
+        run: docker build -f server/Dockerfile -t betmundial-api:ci .
+      - name: Build de la imagen web
+        run: docker build -f web/Dockerfile -t betmundial-web:ci .

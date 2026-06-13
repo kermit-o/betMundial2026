@@ -137,6 +137,12 @@ docker compose up --build     # API en :4000, web servida en :8080
 | POST | `/api/admin/matches/:id/settle` | JWT admin | Liquidar partido y pagar premios |
 | POST | `/api/admin/markets/:id/status` | JWT admin | Suspender / abrir un mercado |
 | POST | `/api/admin/users/:id/kyc` | JWT admin | Forzar estado KYC de un usuario |
+| GET  | `/healthz` · `/readyz` | — | Liveness / readiness (orquestadores) |
+| GET  | `/metrics` | — | Métricas Prometheus (HTTP + negocio) |
+
+> **Producción**: consulta [`PRODUCTION.md`](./PRODUCTION.md) para el runbook,
+> la configuración obligatoria (`assertProductionConfig`), observabilidad y el
+> checklist de *go-live*. Plantillas legales en [`docs/legal/`](./docs/legal/).
 
 ### Ejemplo: colocar una apuesta (simple o combinada)
 

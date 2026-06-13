@@ -18,12 +18,22 @@ FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
+# npm workspaces eleva las dependencias al node_modules raíz; Node las resuelve
+# hacia arriba desde /app/server/dist. (No existe /app/server/node_modules.)
 COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/server/node_modules ./server/node_modules
 COPY --from=build /app/server/dist ./server/dist
 COPY --from=build /app/server/package.json ./server/package.json
 
+# Directorio de datos con permisos para el usuario no-root incorporado 'node'.
+RUN mkdir -p /data && chown -R node:node /data /app
+USER node
+
 WORKDIR /app/server
 EXPOSE 4000
-# Crea el directorio de datos y arranca con seed idempotente.
-CMD ["sh", "-c", "node dist/db/seed.js || true; node dist/index.js"]
+
+# Sonda de salud (Node trae fetch global en v22).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://localhost:'+(process.env.PORT||4000)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+# Seed idempotente y arranque. `exec` deja a node como PID 1 (recibe SIGTERM).
+CMD ["sh", "-c", "node dist/db/seed.js || true; exec node dist/index.js"]
