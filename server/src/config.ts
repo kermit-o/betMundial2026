@@ -44,10 +44,36 @@ export const config = {
   // Antifraude
   fraudMaxBetsPerMinute: int('FRAUD_MAX_BETS_PER_MINUTE', 20),
   rateLimitPerMinute: int('RATE_LIMIT_PER_MINUTE', 120),
+
+  // Operación / despliegue
+  logLevel: str('LOG_LEVEL', 'info'),
+  // Orígenes CORS permitidos (coma). '*' o vacío => abierto (sólo dev).
+  corsOrigins: (process.env.CORS_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+  // Nº de saltos de proxy de confianza (load balancer). 0 = sin proxy.
+  trustProxy: int('TRUST_PROXY', 0),
+  metricsEnabled: str('METRICS_ENABLED', 'true') !== 'false',
+  paymentsWebhookSecret: str('PAYMENTS_WEBHOOK_SECRET', 'sandbox-webhook-secret'),
 } as const;
 
 export const isProd = config.env === 'production';
 
-if (isProd && config.jwtSecret === 'dev-insecure-secret-change-me') {
-  throw new Error('JWT_SECRET debe configurarse explícitamente en producción.');
+/**
+ * Validación de arranque: en producción no se permite arrancar con secretos por
+ * defecto ni configuraciones inseguras. Falla rápido y con un mensaje claro.
+ */
+export function assertProductionConfig(): void {
+  if (!isProd) return;
+  const errors: string[] = [];
+  if (config.jwtSecret === 'dev-insecure-secret-change-me' || config.jwtSecret.length < 32) {
+    errors.push('JWT_SECRET debe ser un secreto fuerte (>= 32 caracteres) en producción.');
+  }
+  if (config.paymentsWebhookSecret === 'sandbox-webhook-secret') {
+    errors.push('PAYMENTS_WEBHOOK_SECRET debe configurarse explícitamente en producción.');
+  }
+  if (config.corsOrigins.length === 0 || config.corsOrigins.includes('*')) {
+    errors.push('CORS_ORIGINS debe enumerar los orígenes permitidos en producción (no usar "*").');
+  }
+  if (errors.length > 0) {
+    throw new Error('Configuración de producción inválida:\n - ' + errors.join('\n - '));
+  }
 }

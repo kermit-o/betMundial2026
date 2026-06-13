@@ -1,8 +1,12 @@
 import http from 'node:http';
-import { config } from './config.js';
+import { config, assertProductionConfig } from './config.js';
 import { getDb, closeDb } from './db/index.js';
 import { createApp } from './app.js';
 import { OddsEngine } from './realtime/oddsEngine.js';
+import { logger } from './utils/logger.js';
+
+// Falla rápido si la configuración de producción es insegura.
+assertProductionConfig();
 
 const db = getDb();
 const app = createApp(db);
@@ -12,14 +16,19 @@ const oddsEngine = new OddsEngine(db, server);
 oddsEngine.start();
 
 server.listen(config.port, () => {
-  console.log(`[bet-mundial-2026] API escuchando en http://localhost:${config.port}`);
-  console.log(`[bet-mundial-2026] WebSocket de cuotas en ws://localhost:${config.port}/ws/odds`);
-  console.log(`[bet-mundial-2026] Entorno: ${config.env}`);
+  logger.info('server_started', {
+    port: config.port,
+    env: config.env,
+    ws: `ws://localhost:${config.port}/ws/odds`,
+  });
 });
 
 // Apagado controlado: cerrar conexiones, motor de cuotas y BD para no perder datos.
+let shuttingDown = false;
 function shutdown(signal: string): void {
-  console.log(`\n[bet-mundial-2026] Recibido ${signal}, cerrando...`);
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info('server_shutdown', { signal });
   oddsEngine.stop();
   server.close(() => {
     closeDb();
@@ -31,5 +40,5 @@ function shutdown(signal: string): void {
 
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('unhandledRejection', (reason) => console.error('[unhandledRejection]', reason));
-process.on('uncaughtException', (err) => console.error('[uncaughtException]', err));
+process.on('unhandledRejection', (reason) => logger.error('unhandled_rejection', { reason: String(reason) }));
+process.on('uncaughtException', (err) => logger.error('uncaught_exception', { error: String(err) }));
