@@ -1,9 +1,6 @@
 import type Database from 'better-sqlite3';
 import { nanoid } from 'nanoid';
-import { AppError, type Transaction, type TransactionType, type User } from '../types.js';
-import { audit } from '../utils/audit.js';
-import { assertDepositWithinLimit } from '../compliance/compliance.service.js';
-import { screenTransaction } from '../fraud/fraud.service.js';
+import { AppError, type Transaction, type TransactionType } from '../types.js';
 
 export function getBalance(db: Database.Database, userId: string): number {
   const row = db.prepare(`SELECT balance FROM wallets WHERE user_id = ?`).get(userId) as
@@ -16,7 +13,7 @@ export function getBalance(db: Database.Database, userId: string): number {
 /**
  * Aplica un movimiento de saldo de forma atómica y deja traza en transactions.
  * Debe invocarse dentro de una transacción SQLite cuando forme parte de una
- * operación compuesta (p.ej. colocar una apuesta).
+ * operación compuesta (p.ej. colocar una apuesta o acreditar un depósito).
  */
 export function applyLedgerEntry(
   db: Database.Database,
@@ -26,8 +23,8 @@ export function applyLedgerEntry(
   refId: string | null,
   status: string = 'completed',
 ): Transaction {
-  const wallet = db.prepare(`SELECT balance, currency FROM wallets WHERE user_id = ?`).get(userId) as
-    | { balance: number; currency: string }
+  const wallet = db.prepare(`SELECT balance FROM wallets WHERE user_id = ?`).get(userId) as
+    | { balance: number }
     | undefined;
   if (!wallet) throw new AppError(404, 'wallet_not_found', 'Cartera no encontrada.');
 
@@ -54,34 +51,6 @@ export function applyLedgerEntry(
   ).run(tx.id, tx.user_id, tx.type, tx.amount, tx.balance_after, tx.ref_id, tx.status);
 
   return tx;
-}
-
-export function deposit(db: Database.Database, user: User, amount: number, ip: string | null): Transaction {
-  if (amount <= 0) throw new AppError(400, 'invalid_amount', 'El importe debe ser positivo.');
-  assertDepositWithinLimit(db, user, amount);
-
-  const run = db.transaction(() => {
-    const tx = applyLedgerEntry(db, user.id, 'deposit', amount, null);
-    screenTransaction(db, user.id, 'deposit', amount);
-    audit(db, 'deposit', { userId: user.id, detail: { amount }, ip });
-    return tx;
-  });
-  return run();
-}
-
-export function withdraw(db: Database.Database, user: User, amount: number, ip: string | null): Transaction {
-  if (amount <= 0) throw new AppError(400, 'invalid_amount', 'El importe debe ser positivo.');
-  if (user.kyc_status !== 'verified') {
-    throw new AppError(403, 'kyc_required', 'Debe completar la verificación KYC antes de retirar fondos.');
-  }
-
-  const run = db.transaction(() => {
-    const tx = applyLedgerEntry(db, user.id, 'withdrawal', -amount, null);
-    screenTransaction(db, user.id, 'withdrawal', amount);
-    audit(db, 'withdrawal', { userId: user.id, detail: { amount }, ip });
-    return tx;
-  });
-  return run();
 }
 
 export function listTransactions(db: Database.Database, userId: string, limit = 50): Transaction[] {

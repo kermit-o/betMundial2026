@@ -12,7 +12,15 @@ export function createApp(db: Database.Database): Express {
   app.disable('x-powered-by');
   app.use(helmet());
   app.use(cors());
-  app.use(express.json({ limit: '64kb' })); // payloads pequeños: límite estricto
+  // Guardamos el cuerpo crudo para poder verificar firmas de webhooks.
+  app.use(
+    express.json({
+      limit: '64kb',
+      verify: (req, _res, buf) => {
+        (req as express.Request & { rawBody?: string }).rawBody = buf.toString('utf-8');
+      },
+    }),
+  );
   app.use(rateLimit()); // rate limit global por IP
 
   app.use('/api', buildRouter(db));

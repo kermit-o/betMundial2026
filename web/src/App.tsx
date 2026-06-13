@@ -5,8 +5,10 @@ import { MatchesView } from './components/MatchesView.js';
 import { WalletView } from './components/WalletView.js';
 import { AccountView } from './components/AccountView.js';
 import { MyBetsView } from './components/MyBetsView.js';
+import { AdminView } from './components/AdminView.js';
+import { RealityCheck } from './components/RealityCheck.js';
 
-type Tab = 'matches' | 'wallet' | 'bets' | 'account';
+type Tab = 'matches' | 'wallet' | 'bets' | 'account' | 'admin';
 
 export function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -37,10 +39,9 @@ export function App() {
   }
 
   if (loading) return <div className="centered">Cargando…</div>;
+  if (!profile) return <AuthView onAuth={() => refreshMe()} />;
 
-  if (!profile) {
-    return <AuthView onAuth={() => refreshMe()} />;
-  }
+  const isAdmin = profile.role === 'admin';
 
   return (
     <div className="app">
@@ -51,6 +52,7 @@ export function App() {
           <button className={tab === 'bets' ? 'active' : ''} onClick={() => setTab('bets')}>Mis apuestas</button>
           <button className={tab === 'wallet' ? 'active' : ''} onClick={() => setTab('wallet')}>Cartera</button>
           <button className={tab === 'account' ? 'active' : ''} onClick={() => setTab('account')}>Cuenta</button>
+          {isAdmin && <button className={tab === 'admin' ? 'active' : ''} onClick={() => setTab('admin')}>Admin</button>}
         </nav>
         <div className="user-area">
           <span className="balance" title="Saldo disponible">
@@ -60,6 +62,8 @@ export function App() {
           <button className="ghost" onClick={onLogout}>Salir</button>
         </div>
       </header>
+
+      <RealityCheck />
 
       {profile.kyc_status !== 'verified' && (
         <div className="banner warn">
@@ -74,9 +78,10 @@ export function App() {
 
       <main className="content">
         {tab === 'matches' && <MatchesView profile={profile} onBalanceChange={setBalance} />}
-        {tab === 'bets' && <MyBetsView profile={profile} />}
+        {tab === 'bets' && <MyBetsView profile={profile} onBalanceChange={setBalance} />}
         {tab === 'wallet' && <WalletView profile={profile} balance={balance} onBalanceChange={setBalance} />}
         {tab === 'account' && <AccountView profile={profile} onUpdated={refreshMe} />}
+        {tab === 'admin' && isAdmin && <AdminView />}
       </main>
 
       <footer className="footer">

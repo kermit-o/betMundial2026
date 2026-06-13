@@ -1,11 +1,12 @@
 import type Database from 'better-sqlite3';
+import { nanoid } from 'nanoid';
 import { AppError, type User } from '../types.js';
 import { audit } from '../utils/audit.js';
+import { getKycProvider } from '../payments/index.js';
 
 /**
- * Simulación de verificación KYC. En producción se integraría con un proveedor
- * (Onfido, Jumio, SumSub...). Aquí aprobamos si el nombre del documento coincide
- * razonablemente y el usuario cumple la edad — suficiente para demostrar el flujo.
+ * Verificación KYC a través del proveedor configurado (sandbox por defecto).
+ * Registra un caso KYC y actualiza el estado del usuario.
  */
 export function submitKyc(
   db: Database.Database,
@@ -15,31 +16,89 @@ export function submitKyc(
 ): { kyc_status: User['kyc_status'] } {
   if (user.kyc_status === 'verified') return { kyc_status: 'verified' };
 
-  const nameMatches =
-    payload.fullNameOnDocument.trim().toLowerCase() === user.full_name.trim().toLowerCase();
-  const validDoc = payload.documentNumber.replace(/\s/g, '').length >= 5;
-  const status: User['kyc_status'] = nameMatches && validDoc ? 'verified' : 'rejected';
-
-  db.prepare(`UPDATE users SET kyc_status = ? WHERE id = ?`).run(status, user.id);
-  audit(db, 'kyc_submission', {
+  const provider = getKycProvider();
+  const result = provider.submit({
     userId: user.id,
-    detail: { documentType: payload.documentType, result: status },
-    ip,
+    documentType: payload.documentType,
+    documentNumber: payload.documentNumber,
+    fullNameOnDocument: payload.fullNameOnDocument,
+    expectedName: user.full_name,
   });
-  return { kyc_status: status };
+
+  const run = db.transaction(() => {
+    db.prepare(
+      `INSERT INTO kyc_cases (id, user_id, provider, status, reference) VALUES (?, ?, ?, ?, ?)`,
+    ).run(nanoid(), user.id, provider.name, result.status, result.reference);
+    db.prepare(`UPDATE users SET kyc_status = ? WHERE id = ?`).run(result.status, user.id);
+    audit(db, 'kyc_submission', {
+      userId: user.id,
+      detail: { provider: provider.name, documentType: payload.documentType, result: result.status },
+      ip,
+    });
+  });
+  run();
+  return { kyc_status: result.status };
 }
 
-export function setDepositLimit(db: Database.Database, user: User, newLimit: number, ip: string | null): void {
+const LIMIT_INCREASE_DELAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Cambio de límite de depósito. Reducir es inmediato (más seguro); aumentar se
+ * programa con enfriamiento de 24h para evitar decisiones impulsivas (requisito
+ * habitual de juego responsable).
+ */
+export function setDepositLimit(db: Database.Database, user: User, newLimit: number, ip: string | null): { applied: boolean; effectiveAt?: string } {
   if (newLimit < 0) throw new AppError(400, 'invalid_limit', 'El límite debe ser positivo.');
-  // Subir el límite es una acción de mayor riesgo; se permite pero queda auditada.
-  db.prepare(`UPDATE users SET daily_deposit_limit = ? WHERE id = ?`).run(newLimit, user.id);
-  audit(db, 'set_deposit_limit', { userId: user.id, detail: { from: user.daily_deposit_limit, to: newLimit }, ip });
+  if (newLimit <= user.daily_deposit_limit) {
+    db.prepare(`UPDATE users SET daily_deposit_limit = ?, pending_deposit_limit = NULL, pending_deposit_effective = NULL WHERE id = ?`).run(newLimit, user.id);
+    audit(db, 'set_deposit_limit', { userId: user.id, detail: { from: user.daily_deposit_limit, to: newLimit, immediate: true }, ip });
+    return { applied: true };
+  }
+  const effectiveAt = new Date(Date.now() + LIMIT_INCREASE_DELAY_MS).toISOString();
+  db.prepare(`UPDATE users SET pending_deposit_limit = ?, pending_deposit_effective = ? WHERE id = ?`).run(newLimit, effectiveAt, user.id);
+  audit(db, 'set_deposit_limit', { userId: user.id, detail: { from: user.daily_deposit_limit, to: newLimit, effectiveAt }, ip });
+  return { applied: false, effectiveAt };
 }
 
-export function setLossLimit(db: Database.Database, user: User, newLimit: number | null, ip: string | null): void {
+export function setLossLimit(db: Database.Database, user: User, newLimit: number | null, ip: string | null): { applied: boolean; effectiveAt?: string } {
   if (newLimit != null && newLimit < 0) throw new AppError(400, 'invalid_limit', 'El límite debe ser positivo.');
-  db.prepare(`UPDATE users SET daily_loss_limit = ? WHERE id = ?`).run(newLimit, user.id);
-  audit(db, 'set_loss_limit', { userId: user.id, detail: { to: newLimit }, ip });
+  const stricter = newLimit == null ? false : user.daily_loss_limit == null ? false : newLimit <= user.daily_loss_limit;
+  // Reducir (o establecer por primera vez) es inmediato; aflojar/quitar espera.
+  const immediate = newLimit != null && (user.daily_loss_limit == null || stricter);
+  if (immediate) {
+    db.prepare(`UPDATE users SET daily_loss_limit = ?, pending_loss_limit = NULL, pending_loss_effective = NULL WHERE id = ?`).run(newLimit, user.id);
+    audit(db, 'set_loss_limit', { userId: user.id, detail: { to: newLimit, immediate: true }, ip });
+    return { applied: true };
+  }
+  const effectiveAt = new Date(Date.now() + LIMIT_INCREASE_DELAY_MS).toISOString();
+  db.prepare(`UPDATE users SET pending_loss_limit = ?, pending_loss_effective = ? WHERE id = ?`).run(newLimit, effectiveAt, user.id);
+  audit(db, 'set_loss_limit', { userId: user.id, detail: { to: newLimit, effectiveAt }, ip });
+  return { applied: false, effectiveAt };
+}
+
+/**
+ * Promueve límites pendientes cuyo periodo de enfriamiento ya venció.
+ * Se invoca al cargar el usuario para que los cambios surtan efecto a tiempo.
+ */
+export function applyPendingLimits(db: Database.Database, user: User): User {
+  const now = Date.now();
+  let changed = false;
+  if (user.pending_deposit_effective && new Date(user.pending_deposit_effective).getTime() <= now) {
+    db.prepare(`UPDATE users SET daily_deposit_limit = ?, pending_deposit_limit = NULL, pending_deposit_effective = NULL WHERE id = ?`).run(user.pending_deposit_limit, user.id);
+    user.daily_deposit_limit = user.pending_deposit_limit!;
+    user.pending_deposit_limit = null;
+    user.pending_deposit_effective = null;
+    changed = true;
+  }
+  if (user.pending_loss_effective && new Date(user.pending_loss_effective).getTime() <= now) {
+    db.prepare(`UPDATE users SET daily_loss_limit = ?, pending_loss_limit = NULL, pending_loss_effective = NULL WHERE id = ?`).run(user.pending_loss_limit, user.id);
+    user.daily_loss_limit = user.pending_loss_limit;
+    user.pending_loss_limit = null;
+    user.pending_loss_effective = null;
+    changed = true;
+  }
+  if (changed) audit(db, 'pending_limits_applied', { userId: user.id });
+  return user;
 }
 
 /** Autoexclusión: bloquea apuestas durante N días (juego responsable). */
@@ -53,9 +112,36 @@ export function selfExclude(db: Database.Database, user: User, days: number, ip:
   return { until };
 }
 
-/** Vista pública del perfil (sin hash de contraseña). */
+/**
+ * "Reality check": resumen de la actividad reciente (última hora) para mostrar
+ * al usuario cuánto tiempo lleva jugando y cuánto ha apostado/ganado.
+ */
+export function realityCheck(db: Database.Database, userId: string): {
+  windowMinutes: number;
+  betsCount: number;
+  totalStaked: number;
+  netResult: number;
+} {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS n, COALESCE(SUM(stake),0) AS staked
+         FROM bets WHERE user_id = ? AND placed_at >= datetime('now','-1 hour')`,
+    )
+    .get(userId) as { n: number; staked: number };
+  const net = db
+    .prepare(
+      `SELECT COALESCE(SUM(amount),0) AS net FROM transactions
+        WHERE user_id = ? AND type IN ('bet_stake','bet_payout','cashout','refund')
+          AND created_at >= datetime('now','-1 hour')`,
+    )
+    .get(userId) as { net: number };
+  return { windowMinutes: 60, betsCount: row.n, totalStaked: row.staked, netResult: net.net };
+}
+
+/** Vista pública del perfil (sin secretos). */
 export function publicProfile(user: User) {
-  const { password_hash, ...rest } = user;
+  const { password_hash, mfa_secret, ...rest } = user;
   void password_hash;
+  void mfa_secret;
   return rest;
 }

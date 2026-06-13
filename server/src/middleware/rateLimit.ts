@@ -14,13 +14,18 @@ interface Bucket {
 const buckets = new Map<string, Bucket>();
 const WINDOW_MS = 60_000;
 
-function clientKey(req: Request): string {
+function clientIp(req: Request): string {
   return (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'unknown';
 }
 
-export function rateLimit(maxPerMinute = config.rateLimitPerMinute) {
+/**
+ * Limita peticiones por minuto y por IP. Cada limitador usa su propio `scope`
+ * para no compartir contador: así el límite estricto de auth no se agota con
+ * el tráfico general (que pasa por el limitador global).
+ */
+export function rateLimit(maxPerMinute = config.rateLimitPerMinute, scope = 'global') {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const key = clientKey(req);
+    const key = `${scope}:${clientIp(req)}`;
     const now = Date.now();
     let bucket = buckets.get(key);
     if (!bucket || bucket.resetAt <= now) {

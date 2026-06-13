@@ -20,9 +20,16 @@ export function makeUser(db: Database.Database, overrides: Partial<User> = {}): 
     currency: 'EUR',
     role: 'user',
     kyc_status: 'verified',
+    email_verified: 1,
+    mfa_enabled: 0,
+    mfa_secret: null,
     self_excluded_until: null,
     daily_deposit_limit: 50_000,
     daily_loss_limit: null,
+    pending_deposit_limit: null,
+    pending_deposit_effective: null,
+    pending_loss_limit: null,
+    pending_loss_effective: null,
     terms_accepted_at: now,
     signup_ip: '10.0.0.1',
     created_at: now,
@@ -30,11 +37,13 @@ export function makeUser(db: Database.Database, overrides: Partial<User> = {}): 
   };
   db.prepare(
     `INSERT INTO users (id, email, password_hash, full_name, date_of_birth, jurisdiction, currency,
-      role, kyc_status, self_excluded_until, daily_deposit_limit, daily_loss_limit, terms_accepted_at,
-      signup_ip, created_at)
+      role, kyc_status, email_verified, mfa_enabled, mfa_secret, self_excluded_until, daily_deposit_limit,
+      daily_loss_limit, pending_deposit_limit, pending_deposit_effective, pending_loss_limit,
+      pending_loss_effective, terms_accepted_at, signup_ip, created_at)
      VALUES (@id,@email,@password_hash,@full_name,@date_of_birth,@jurisdiction,@currency,@role,
-      @kyc_status,@self_excluded_until,@daily_deposit_limit,@daily_loss_limit,@terms_accepted_at,
-      @signup_ip,@created_at)`,
+      @kyc_status,@email_verified,@mfa_enabled,@mfa_secret,@self_excluded_until,@daily_deposit_limit,
+      @daily_loss_limit,@pending_deposit_limit,@pending_deposit_effective,@pending_loss_limit,
+      @pending_loss_effective,@terms_accepted_at,@signup_ip,@created_at)`,
   ).run(user);
   db.prepare(`INSERT INTO wallets (user_id, balance, currency) VALUES (?, ?, ?)`).run(
     user.id,

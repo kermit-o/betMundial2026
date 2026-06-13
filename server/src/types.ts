@@ -11,15 +11,22 @@ export interface User {
   currency: string;
   role: Role;
   kyc_status: KycStatus;
+  email_verified: number;
+  mfa_enabled: number;
+  mfa_secret: string | null;
   self_excluded_until: string | null;
   daily_deposit_limit: number;
   daily_loss_limit: number | null;
+  pending_deposit_limit: number | null;
+  pending_deposit_effective: string | null;
+  pending_loss_limit: number | null;
+  pending_loss_effective: string | null;
   terms_accepted_at: string | null;
   signup_ip: string | null;
   created_at: string;
 }
 
-export type TransactionType = 'deposit' | 'withdrawal' | 'bet_stake' | 'bet_payout' | 'refund';
+export type TransactionType = 'deposit' | 'withdrawal' | 'bet_stake' | 'bet_payout' | 'refund' | 'cashout';
 
 export interface Transaction {
   id: string;
@@ -61,21 +68,45 @@ export interface Market {
   status: 'open' | 'suspended' | 'settled';
 }
 
-export type BetStatus = 'open' | 'won' | 'lost' | 'void';
+export type BetStatus = 'open' | 'won' | 'lost' | 'void' | 'cashed_out';
+export type LegResult = 'pending' | 'won' | 'lost' | 'void';
 
 export interface Bet {
   id: string;
   user_id: string;
-  selection_id: string;
-  market_id: string;
-  match_id: string;
+  type: 'single' | 'combo';
   stake: number;
-  odds: number;
+  total_odds: number;
   potential_payout: number;
   status: BetStatus;
+  cash_out_value: number | null;
   risk_score: number;
   placed_at: string;
   settled_at: string | null;
+}
+
+export interface BetLeg {
+  id: string;
+  bet_id: string;
+  selection_id: string;
+  market_id: string;
+  match_id: string;
+  odds: number;
+  result: LegResult;
+}
+
+export interface PaymentIntent {
+  id: string;
+  user_id: string;
+  provider: string;
+  type: 'deposit' | 'payout';
+  amount: number;
+  currency: string;
+  status: 'pending' | 'completed' | 'failed';
+  idempotency_key: string;
+  provider_ref: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AuthUser {
