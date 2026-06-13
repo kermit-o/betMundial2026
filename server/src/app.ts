@@ -1,6 +1,8 @@
 import express, { type Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import fs from 'node:fs';
+import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { buildRouter } from './routes/index.js';
 import { rateLimit } from './middleware/rateLimit.js';
@@ -20,6 +22,17 @@ export function createApp(db: Database.Database): Express {
   app.use(
     helmet({
       hsts: isProd ? { maxAge: 15552000, includeSubDomains: true } : false,
+      // CSP compatible con la SPA servida desde el mismo origen y el WebSocket.
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", 'data:'],
+          connectSrc: ["'self'", 'ws:', 'wss:'],
+          fontSrc: ["'self'", 'data:'],
+        },
+      },
     }),
   );
 
@@ -63,7 +76,21 @@ export function createApp(db: Database.Database): Express {
 
   app.use('/api', buildRouter(db));
 
-  // 404 para rutas desconocidas bajo la API.
+  // 404 para rutas /api desconocidas (no deben caer en la SPA).
+  app.use('/api', (_req, res) => res.status(404).json({ error: { code: 'not_found', message: 'Recurso no encontrado.' } }));
+
+  // Servir la SPA compilada si WEB_DIST existe (despliegue de un solo servicio).
+  const webDist = process.env.WEB_DIST || path.resolve(process.cwd(), '../web/dist');
+  if (fs.existsSync(path.join(webDist, 'index.html'))) {
+    app.use(express.static(webDist, { index: false, maxAge: '1h' }));
+    // Fallback SPA: cualquier GET no-API devuelve index.html.
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api')) return next();
+      res.sendFile(path.join(webDist, 'index.html'));
+    });
+  }
+
+  // 404 genérico (sin SPA montada).
   app.use((_req, res) => res.status(404).json({ error: { code: 'not_found', message: 'Recurso no encontrado.' } }));
 
   app.use(errorHandler);
