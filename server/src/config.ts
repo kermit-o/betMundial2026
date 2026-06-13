@@ -32,7 +32,8 @@ export const config = {
   jwtSecret: str('JWT_SECRET', 'dev-insecure-secret-change-me'),
   jwtExpiresIn: int('JWT_EXPIRES_IN', 3600),
 
-  databasePath: str('DATABASE_PATH', path.resolve(__dirname, '../../data/bet.db')),
+  databaseUrl: str('DATABASE_URL', 'postgresql://bet:betpass@localhost:5432/betmundial'),
+  databasePoolMax: int('DATABASE_POOL_MAX', 10),
 
   // Cumplimiento normativo
   allowedJurisdictions: list('ALLOWED_JURISDICTIONS', ['ES', 'MX', 'CO', 'PE', 'AR', 'CL', 'UK', 'MT']),
@@ -72,6 +73,9 @@ export function assertProductionConfig(): void {
   }
   if (config.corsOrigins.length === 0 || config.corsOrigins.includes('*')) {
     errors.push('CORS_ORIGINS debe enumerar los orígenes permitidos en producción (no usar "*").');
+  }
+  if (!process.env.DATABASE_URL) {
+    errors.push('DATABASE_URL debe apuntar a la base de datos PostgreSQL de producción.');
   }
   if (errors.length > 0) {
     throw new Error('Configuración de producción inválida:\n - ' + errors.join('\n - '));

@@ -1,6 +1,7 @@
-import type Database from 'better-sqlite3';
+import type { Db, Executor } from '../db/index.js';
 import { AppError, type Bet, type BetLeg, type Market, type Selection } from '../types.js';
 import { audit } from '../utils/audit.js';
+import { nowIso } from '../utils/time.js';
 import { applyLedgerEntry } from '../wallet/wallet.service.js';
 import { getJurisdictionRule } from '../compliance/jurisdictions.js';
 import { findUserById } from '../auth/users.repo.js';
@@ -25,101 +26,91 @@ function winningSelectionName(marketType: string, home: number, away: number): s
  * Liquida todos los mercados de un partido finalizado: marca selecciones y
  * patas, y resuelve los boletos (simples y combinados) que queden completos.
  */
-export function settleMatch(
-  db: Database.Database,
+export async function settleMatch(
+  db: Db,
   matchId: string,
   homeScore: number,
   awayScore: number,
-): { settledBets: number; totalPaidOut: number } {
-  const match = db.prepare(`SELECT id FROM matches WHERE id = ?`).get(matchId) as { id: string } | undefined;
+): Promise<{ settledBets: number; totalPaidOut: number }> {
+  const match = await db.oneOrNone<{ id: string }>(`SELECT id FROM matches WHERE id = $1`, [matchId]);
   if (!match) throw new AppError(404, 'match_not_found', 'Partido no encontrado.');
 
-  let settledBets = 0;
-  let totalPaidOut = 0;
+  return db.tx(async (t) => {
+    let settledBets = 0;
+    let totalPaidOut = 0;
 
-  const run = db.transaction(() => {
-    db.prepare(`UPDATE matches SET status='finished', home_score=?, away_score=? WHERE id=?`).run(homeScore, awayScore, matchId);
+    await t.none(`UPDATE matches SET status='finished', home_score=$1, away_score=$2 WHERE id=$3`, [homeScore, awayScore, matchId]);
 
-    const markets = db.prepare(`SELECT * FROM markets WHERE match_id = ?`).all(matchId) as Market[];
+    const markets = await t.query<Market>(`SELECT * FROM markets WHERE match_id = $1`, [matchId]);
     for (const market of markets) {
       const winnerName = winningSelectionName(market.type, homeScore, awayScore);
-      const selections = db.prepare(`SELECT * FROM selections WHERE market_id = ?`).all(market.id) as Selection[];
+      const selections = await t.query<Selection>(`SELECT * FROM selections WHERE market_id = $1`, [market.id]);
       for (const sel of selections) {
         const result = winnerName === null ? 'void' : sel.name === winnerName ? 'won' : 'lost';
-        db.prepare(`UPDATE selections SET result = ? WHERE id = ?`).run(result, sel.id);
-        // Propagar el resultado a todas las patas que apostaron esta selección.
-        db.prepare(`UPDATE bet_legs SET result = ? WHERE selection_id = ? AND result = 'pending'`).run(result, sel.id);
+        await t.none(`UPDATE selections SET result = $1 WHERE id = $2`, [result, sel.id]);
+        await t.none(`UPDATE bet_legs SET result = $1 WHERE selection_id = $2 AND result = 'pending'`, [result, sel.id]);
       }
-      db.prepare(`UPDATE markets SET status='settled' WHERE id = ?`).run(market.id);
+      await t.none(`UPDATE markets SET status='settled' WHERE id = $1`, [market.id]);
     }
 
-    // Boletos afectados por este partido y aún abiertos.
-    const affected = db
-      .prepare(`SELECT DISTINCT bet_id FROM bet_legs WHERE match_id = ?`)
-      .all(matchId) as Array<{ bet_id: string }>;
-
+    const affected = await t.query<{ bet_id: string }>(`SELECT DISTINCT bet_id FROM bet_legs WHERE match_id = $1`, [matchId]);
     for (const { bet_id } of affected) {
-      const outcome = settleBetIfComplete(db, bet_id);
+      const outcome = await settleBetIfComplete(t, bet_id);
       if (outcome) {
         settledBets++;
         totalPaidOut += outcome.paidOut;
       }
     }
 
-    audit(db, 'match_settled', { detail: { matchId, homeScore, awayScore, settledBets, totalPaidOut } });
+    await audit(t, 'match_settled', { detail: { matchId, homeScore, awayScore, settledBets, totalPaidOut } });
+    return { settledBets, totalPaidOut };
   });
-  run();
-
-  return { settledBets, totalPaidOut };
 }
 
 /**
  * Resuelve un boleto si todas sus patas están decididas. Reglas:
  *  - Alguna pata perdida  → boleto perdido (sin pago).
  *  - Todas anuladas       → boleto anulado (reembolso del stake).
- *  - Resto                → ganado: pago = stake × Π(cuotas de patas ganadas)
- *                           (las anuladas cuentan como cuota 1), menos impuesto.
- * Devuelve null si el boleto sigue abierto (patas pendientes) o ya estaba cerrado.
+ *  - Resto                → ganado: pago = stake × Π(cuotas de patas ganadas), menos impuesto.
  */
-export function settleBetIfComplete(db: Database.Database, betId: string): { status: Bet['status']; paidOut: number } | null {
-  const bet = db.prepare(`SELECT * FROM bets WHERE id = ?`).get(betId) as Bet | undefined;
+export async function settleBetIfComplete(db: Executor, betId: string): Promise<{ status: Bet['status']; paidOut: number } | null> {
+  const bet = await db.oneOrNone<Bet>(`SELECT * FROM bets WHERE id = $1`, [betId]);
   if (!bet || bet.status !== 'open') return null;
 
-  const legs = db.prepare(`SELECT * FROM bet_legs WHERE bet_id = ?`).all(betId) as BetLeg[];
-  if (legs.some((l) => l.result === 'pending')) return null; // aún no liquidable
+  const legs = await db.query<BetLeg>(`SELECT * FROM bet_legs WHERE bet_id = $1`, [betId]);
+  if (legs.some((l) => l.result === 'pending')) return null;
 
   const anyLost = legs.some((l) => l.result === 'lost');
   const allVoid = legs.every((l) => l.result === 'void');
 
   if (anyLost) {
-    markBet(db, betId, 'lost', null);
+    await markBet(db, betId, 'lost');
     return { status: 'lost', paidOut: 0 };
   }
 
   if (allVoid) {
-    applyLedgerEntry(db, bet.user_id, 'refund', bet.stake, betId);
-    markBet(db, betId, 'void', null);
+    await applyLedgerEntry(db, bet.user_id, 'refund', bet.stake, betId);
+    await markBet(db, betId, 'void');
     return { status: 'void', paidOut: 0 };
   }
 
-  // Ganado: producto de cuotas de patas ganadas (anuladas = 1).
   const effectiveOdds = legs.reduce((acc, l) => (l.result === 'won' ? acc * l.odds : acc), 1);
   const grossPayout = Math.floor(bet.stake * effectiveOdds);
-  const netPayout = applyWinningsTax(db, bet.user_id, bet.stake, grossPayout);
-  applyLedgerEntry(db, bet.user_id, 'bet_payout', netPayout, betId);
-  markBet(db, betId, 'won', null);
+  const netPayout = await applyWinningsTax(db, bet.user_id, bet.stake, grossPayout);
+  await applyLedgerEntry(db, bet.user_id, 'bet_payout', netPayout, betId);
+  await markBet(db, betId, 'won');
   return { status: 'won', paidOut: netPayout };
 }
 
 /** Aplica el impuesto sobre la ganancia neta según la jurisdicción del usuario. */
-function applyWinningsTax(db: Database.Database, userId: string, stake: number, grossPayout: number): number {
-  const user = findUserById(db, userId);
+async function applyWinningsTax(db: Executor, userId: string, stake: number, grossPayout: number): Promise<number> {
+  const user = await findUserById(db, userId);
   const taxRate = user ? getJurisdictionRule(user.jurisdiction).winningsTaxRate : 0;
   const grossProfit = grossPayout - stake;
   const tax = grossProfit > 0 ? Math.floor(grossProfit * taxRate) : 0;
   return grossPayout - tax;
 }
 
-function markBet(db: Database.Database, betId: string, status: Bet['status'], cashOutValue: number | null): void {
-  db.prepare(`UPDATE bets SET status = ?, cash_out_value = ?, settled_at = datetime('now') WHERE id = ?`).run(status, cashOutValue, betId);
+async function markBet(db: Executor, betId: string, status: Bet['status']): Promise<void> {
+  await db.none(`UPDATE bets SET status = $1, settled_at = $2 WHERE id = $3`, [status, nowIso(), betId]);
 }

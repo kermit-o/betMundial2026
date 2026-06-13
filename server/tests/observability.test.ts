@@ -1,13 +1,20 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
-import { createInMemoryDb } from '../src/db/index.js';
+import type { Express } from 'express';
+import { createTestDb, type Db } from '../src/db/index.js';
 import { createApp } from '../src/app.js';
 import { seed } from '../src/db/seed.js';
 
 describe('observabilidad y operación', () => {
-  const db = createInMemoryDb();
-  seed(db);
-  const app = createApp(db);
+  let db: Db;
+  let app: Express;
+
+  beforeAll(async () => {
+    db = await createTestDb();
+    await seed(db);
+    app = createApp(db);
+  });
+  afterAll(async () => { await db.close(); });
 
   it('expone liveness en /healthz', async () => {
     const res = await request(app).get('/healthz');
@@ -22,7 +29,6 @@ describe('observabilidad y operación', () => {
   });
 
   it('expone métricas Prometheus en /metrics', async () => {
-    // Generamos algo de tráfico para que haya contadores.
     await request(app).get('/healthz');
     await request(app).get('/api/matches');
     const res = await request(app).get('/metrics');

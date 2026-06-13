@@ -1,6 +1,6 @@
 import { Router, type Request } from 'express';
-import type Database from 'better-sqlite3';
 import { nanoid } from 'nanoid';
+import type { Db } from '../db/index.js';
 import { asyncHandler } from '../middleware/error.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
@@ -55,17 +55,18 @@ import {
   adminStats,
 } from '../admin/admin.service.js';
 import { listAllowedJurisdictions } from '../compliance/jurisdictions.js';
+import type { User } from '../types.js';
 
 function ipOf(req: Request): string | null {
   return (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || null;
 }
 
 /** Carga el usuario actual y promueve cualquier límite pendiente ya vigente. */
-function loadUser(db: Database.Database, req: Request) {
-  return applyPendingLimits(db, requireUser(db, req.auth!.id));
+async function loadUser(db: Db, req: Request): Promise<User> {
+  return applyPendingLimits(db, await requireUser(db, req.auth!.id));
 }
 
-export function buildRouter(db: Database.Database): Router {
+export function buildRouter(db: Db): Router {
   const r = Router();
 
   // --- Salud / metadatos ---
@@ -76,9 +77,9 @@ export function buildRouter(db: Database.Database): Router {
   r.post(
     '/auth/register',
     rateLimit(10, 'auth'),
-    asyncHandler((req, res) => {
+    asyncHandler(async (req, res) => {
       const input = registerSchema.parse(req.body);
-      const { user, token } = register(db, input, ipOf(req));
+      const { user, token } = await register(db, input, ipOf(req));
       res.status(201).json({ token, user: publicProfile(user) });
     }),
   );
@@ -86,9 +87,9 @@ export function buildRouter(db: Database.Database): Router {
   r.post(
     '/auth/login',
     rateLimit(10, 'auth'),
-    asyncHandler((req, res) => {
+    asyncHandler(async (req, res) => {
       const { email, password, mfaCode } = loginSchema.parse(req.body);
-      const { user, token } = login(db, email, password, ipOf(req), mfaCode);
+      const { user, token } = await login(db, email, password, ipOf(req), mfaCode);
       res.json({ token, user: publicProfile(user) });
     }),
   );
@@ -96,10 +97,9 @@ export function buildRouter(db: Database.Database): Router {
   r.post(
     '/auth/forgot-password',
     rateLimit(5, 'auth'),
-    asyncHandler((req, res) => {
+    asyncHandler(async (req, res) => {
       const { email } = forgotPasswordSchema.parse(req.body);
-      const { token } = requestPasswordReset(db, email);
-      // Respuesta neutra (anti-enumeración). En la demo devolvemos el token.
+      const { token } = await requestPasswordReset(db, email);
       res.json({ ok: true, ...(token ? { devToken: token } : {}) });
     }),
   );
@@ -107,9 +107,9 @@ export function buildRouter(db: Database.Database): Router {
   r.post(
     '/auth/reset-password',
     rateLimit(10, 'auth'),
-    asyncHandler((req, res) => {
+    asyncHandler(async (req, res) => {
       const { token, newPassword } = resetPasswordSchema.parse(req.body);
-      resetPassword(db, token, newPassword);
+      await resetPassword(db, token, newPassword);
       res.json({ ok: true });
     }),
   );
@@ -117,9 +117,9 @@ export function buildRouter(db: Database.Database): Router {
   r.post(
     '/auth/verify-email',
     rateLimit(20, 'auth'),
-    asyncHandler((req, res) => {
+    asyncHandler(async (req, res) => {
       const { token } = verifyEmailSchema.parse(req.body);
-      verifyEmail(db, token);
+      await verifyEmail(db, token);
       res.json({ ok: true });
     }),
   );
@@ -127,15 +127,15 @@ export function buildRouter(db: Database.Database): Router {
   // --- Catálogo de partidos / cuotas (público) ---
   r.get(
     '/matches',
-    asyncHandler((req, res) => {
+    asyncHandler(async (req, res) => {
       const status = typeof req.query.status === 'string' ? req.query.status : undefined;
-      res.json({ matches: listMatches(db, status) });
+      res.json({ matches: await listMatches(db, status) });
     }),
   );
   r.get(
     '/matches/:id',
-    asyncHandler((req, res) => {
-      const match = getMatch(db, req.params.id);
+    asyncHandler(async (req, res) => {
+      const match = await getMatch(db, req.params.id);
       if (!match) return res.status(404).json({ error: { code: 'not_found', message: 'Partido no encontrado.' } });
       res.json({ match });
     }),
@@ -145,32 +145,32 @@ export function buildRouter(db: Database.Database): Router {
   r.get(
     '/me',
     requireAuth,
-    asyncHandler((req, res) => {
-      const user = loadUser(db, req);
-      res.json({ user: publicProfile(user), balance: getBalance(db, user.id) });
+    asyncHandler(async (req, res) => {
+      const user = await loadUser(db, req);
+      res.json({ user: publicProfile(user), balance: await getBalance(db, user.id) });
     }),
   );
 
   r.get(
     '/me/reality-check',
     requireAuth,
-    asyncHandler((req, res) => res.json(realityCheck(db, req.auth!.id))),
+    asyncHandler(async (req, res) => res.json(await realityCheck(db, req.auth!.id))),
   );
 
   r.post(
     '/me/kyc',
     requireAuth,
-    asyncHandler((req, res) => {
+    asyncHandler(async (req, res) => {
       const payload = kycSchema.parse(req.body);
-      res.json(submitKyc(db, loadUser(db, req), payload, ipOf(req)));
+      res.json(await submitKyc(db, await loadUser(db, req), payload, ipOf(req)));
     }),
   );
 
   r.post(
     '/me/email/verify-request',
     requireAuth,
-    asyncHandler((req, res) => {
-      const { token } = requestEmailVerification(db, loadUser(db, req));
+    asyncHandler(async (req, res) => {
+      const { token } = await requestEmailVerification(db, await loadUser(db, req));
       res.json({ ok: true, devToken: token });
     }),
   );
@@ -178,27 +178,27 @@ export function buildRouter(db: Database.Database): Router {
   r.put(
     '/me/limits/deposit',
     requireAuth,
-    asyncHandler((req, res) => {
+    asyncHandler(async (req, res) => {
       const { amount } = depositLimitSchema.parse(req.body);
-      res.json(setDepositLimit(db, loadUser(db, req), amount, ipOf(req)));
+      res.json(await setDepositLimit(db, await loadUser(db, req), amount, ipOf(req)));
     }),
   );
 
   r.put(
     '/me/limits/loss',
     requireAuth,
-    asyncHandler((req, res) => {
+    asyncHandler(async (req, res) => {
       const { amount } = lossLimitSchema.parse(req.body);
-      res.json(setLossLimit(db, loadUser(db, req), amount, ipOf(req)));
+      res.json(await setLossLimit(db, await loadUser(db, req), amount, ipOf(req)));
     }),
   );
 
   r.post(
     '/me/self-exclude',
     requireAuth,
-    asyncHandler((req, res) => {
+    asyncHandler(async (req, res) => {
       const { days } = selfExcludeSchema.parse(req.body);
-      res.json(selfExclude(db, loadUser(db, req), days, ipOf(req)));
+      res.json(await selfExclude(db, await loadUser(db, req), days, ipOf(req)));
     }),
   );
 
@@ -206,23 +206,23 @@ export function buildRouter(db: Database.Database): Router {
   r.post(
     '/me/mfa/setup',
     requireAuth,
-    asyncHandler((req, res) => res.json(setupMfa(db, loadUser(db, req)))),
+    asyncHandler(async (req, res) => res.json(await setupMfa(db, await loadUser(db, req)))),
   );
   r.post(
     '/me/mfa/enable',
     requireAuth,
-    asyncHandler((req, res) => {
+    asyncHandler(async (req, res) => {
       const { code } = mfaEnableSchema.parse(req.body);
-      enableMfa(db, loadUser(db, req), code);
+      await enableMfa(db, await loadUser(db, req), code);
       res.json({ ok: true, mfa_enabled: true });
     }),
   );
   r.post(
     '/me/mfa/disable',
     requireAuth,
-    asyncHandler((req, res) => {
+    asyncHandler(async (req, res) => {
       const { code } = mfaDisableSchema.parse(req.body);
-      disableMfa(db, loadUser(db, req), code);
+      await disableMfa(db, await loadUser(db, req), code);
       res.json({ ok: true, mfa_enabled: false });
     }),
   );
@@ -231,11 +231,11 @@ export function buildRouter(db: Database.Database): Router {
   r.get(
     '/wallet',
     requireAuth,
-    asyncHandler((req, res) => {
+    asyncHandler(async (req, res) => {
       res.json({
-        balance: getBalance(db, req.auth!.id),
-        transactions: listTransactions(db, req.auth!.id),
-        payments: listPaymentIntents(db, req.auth!.id),
+        balance: await getBalance(db, req.auth!.id),
+        transactions: await listTransactions(db, req.auth!.id),
+        payments: await listPaymentIntents(db, req.auth!.id),
       });
     }),
   );
@@ -244,10 +244,10 @@ export function buildRouter(db: Database.Database): Router {
     '/wallet/deposit',
     requireAuth,
     rateLimit(30, 'wallet'),
-    asyncHandler((req, res) => {
+    asyncHandler(async (req, res) => {
       const { amount, idempotencyKey } = amountSchema.parse(req.body);
       const key = idempotencyKey ?? (req.headers['idempotency-key'] as string) ?? nanoid();
-      const { intent, balance } = initiateDeposit(db, loadUser(db, req), amount, key, ipOf(req));
+      const { intent, balance } = await initiateDeposit(db, await loadUser(db, req), amount, key, ipOf(req));
       res.status(201).json({ intent, balance });
     }),
   );
@@ -256,10 +256,10 @@ export function buildRouter(db: Database.Database): Router {
     '/wallet/withdraw',
     requireAuth,
     rateLimit(30, 'wallet'),
-    asyncHandler((req, res) => {
+    asyncHandler(async (req, res) => {
       const { amount, idempotencyKey } = amountSchema.parse(req.body);
       const key = idempotencyKey ?? (req.headers['idempotency-key'] as string) ?? nanoid();
-      const { intent, balance } = initiatePayout(db, loadUser(db, req), amount, key, ipOf(req));
+      const { intent, balance } = await initiatePayout(db, await loadUser(db, req), amount, key, ipOf(req));
       res.status(201).json({ intent, balance });
     }),
   );
@@ -267,10 +267,10 @@ export function buildRouter(db: Database.Database): Router {
   // Webhook de confirmaciones de pago (firmado). Cuerpo crudo en req.rawBody.
   r.post(
     '/webhooks/payments',
-    asyncHandler((req, res) => {
+    asyncHandler(async (req, res) => {
       const raw = (req as Request & { rawBody?: string }).rawBody ?? JSON.stringify(req.body);
       const sig = req.headers['x-signature'] as string | undefined;
-      res.json(handleWebhook(db, raw, sig));
+      res.json(await handleWebhook(db, raw, sig));
     }),
   );
 
@@ -279,43 +279,43 @@ export function buildRouter(db: Database.Database): Router {
     '/bets',
     requireAuth,
     rateLimit(60, 'bets'),
-    asyncHandler((req, res) => {
+    asyncHandler(async (req, res) => {
       const input = placeBetSchema.parse(req.body);
-      const user = loadUser(db, req);
-      const bet = placeBet(db, user, input, ipOf(req));
-      res.status(201).json({ bet, balance: getBalance(db, user.id) });
+      const user = await loadUser(db, req);
+      const bet = await placeBet(db, user, input, ipOf(req));
+      res.status(201).json({ bet, balance: await getBalance(db, user.id) });
     }),
   );
 
   r.get(
     '/bets',
     requireAuth,
-    asyncHandler((req, res) => res.json({ bets: listUserBets(db, req.auth!.id) })),
+    asyncHandler(async (req, res) => res.json({ bets: await listUserBets(db, req.auth!.id) })),
   );
 
   r.post(
     '/bets/:id/cashout',
     requireAuth,
     rateLimit(60, 'bets'),
-    asyncHandler((req, res) => {
-      const user = loadUser(db, req);
-      res.json(cashOut(db, user, req.params.id, ipOf(req)));
+    asyncHandler(async (req, res) => {
+      const user = await loadUser(db, req);
+      res.json(await cashOut(db, user, req.params.id, ipOf(req)));
     }),
   );
 
   // --- Administración ---
-  r.get('/admin/stats', requireAuth, requireAdmin, asyncHandler((_req, res) => res.json(adminStats(db))));
-  r.get('/admin/fraud-flags', requireAuth, requireAdmin, asyncHandler((_req, res) => res.json({ flags: listFraudFlags(db) })));
-  r.get('/admin/audit', requireAuth, requireAdmin, asyncHandler((_req, res) => res.json({ entries: listAuditLog(db) })));
-  r.get('/admin/users', requireAuth, requireAdmin, asyncHandler((_req, res) => res.json({ users: listUsers(db) })));
+  r.get('/admin/stats', requireAuth, requireAdmin, asyncHandler(async (_req, res) => res.json(await adminStats(db))));
+  r.get('/admin/fraud-flags', requireAuth, requireAdmin, asyncHandler(async (_req, res) => res.json({ flags: await listFraudFlags(db) })));
+  r.get('/admin/audit', requireAuth, requireAdmin, asyncHandler(async (_req, res) => res.json({ entries: await listAuditLog(db) })));
+  r.get('/admin/users', requireAuth, requireAdmin, asyncHandler(async (_req, res) => res.json({ users: await listUsers(db) })));
 
   r.post(
     '/admin/matches/:id/settle',
     requireAuth,
     requireAdmin,
-    asyncHandler((req, res) => {
+    asyncHandler(async (req, res) => {
       const { homeScore, awayScore } = settleSchema.parse(req.body);
-      res.json(settleMatch(db, req.params.id, homeScore, awayScore));
+      res.json(await settleMatch(db, req.params.id, homeScore, awayScore));
     }),
   );
 
@@ -323,9 +323,9 @@ export function buildRouter(db: Database.Database): Router {
     '/admin/markets/:id/status',
     requireAuth,
     requireAdmin,
-    asyncHandler((req, res) => {
+    asyncHandler(async (req, res) => {
       const { status } = marketStatusSchema.parse(req.body);
-      res.json(setMarketStatus(db, req.params.id, status, req.auth!.id));
+      res.json(await setMarketStatus(db, req.params.id, status, req.auth!.id));
     }),
   );
 
@@ -333,9 +333,9 @@ export function buildRouter(db: Database.Database): Router {
     '/admin/users/:id/kyc',
     requireAuth,
     requireAdmin,
-    asyncHandler((req, res) => {
+    asyncHandler(async (req, res) => {
       const { status } = forceKycSchema.parse(req.body);
-      res.json(forceKycStatus(db, req.params.id, status, req.auth!.id));
+      res.json(await forceKycStatus(db, req.params.id, status, req.auth!.id));
     }),
   );
 

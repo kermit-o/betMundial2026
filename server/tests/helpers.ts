@@ -1,15 +1,14 @@
-import type Database from 'better-sqlite3';
 import bcrypt from 'bcryptjs';
 import { nanoid } from 'nanoid';
-import { createInMemoryDb } from '../src/db/index.js';
+import { createTestDb, type Db } from '../src/db/index.js';
 import type { User } from '../src/types.js';
 
-export function freshDb(): Database.Database {
-  return createInMemoryDb();
+export function freshDb(): Promise<Db> {
+  return createTestDb();
 }
 
-export function makeUser(db: Database.Database, overrides: Partial<User> = {}): User {
-  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+export async function makeUser(db: Db, overrides: Partial<User> = {}): Promise<User> {
+  const now = new Date().toISOString();
   const user: User = {
     id: nanoid(),
     email: `${nanoid(6)}@test.com`,
@@ -35,50 +34,46 @@ export function makeUser(db: Database.Database, overrides: Partial<User> = {}): 
     created_at: now,
     ...overrides,
   };
-  db.prepare(
+  await db.none(
     `INSERT INTO users (id, email, password_hash, full_name, date_of_birth, jurisdiction, currency,
       role, kyc_status, email_verified, mfa_enabled, mfa_secret, self_excluded_until, daily_deposit_limit,
       daily_loss_limit, pending_deposit_limit, pending_deposit_effective, pending_loss_limit,
       pending_loss_effective, terms_accepted_at, signup_ip, created_at)
-     VALUES (@id,@email,@password_hash,@full_name,@date_of_birth,@jurisdiction,@currency,@role,
-      @kyc_status,@email_verified,@mfa_enabled,@mfa_secret,@self_excluded_until,@daily_deposit_limit,
-      @daily_loss_limit,@pending_deposit_limit,@pending_deposit_effective,@pending_loss_limit,
-      @pending_loss_effective,@terms_accepted_at,@signup_ip,@created_at)`,
-  ).run(user);
-  db.prepare(`INSERT INTO wallets (user_id, balance, currency) VALUES (?, ?, ?)`).run(
-    user.id,
-    overrides.daily_deposit_limit === undefined ? 100_000 : 100_000,
-    user.currency,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
+    [
+      user.id, user.email, user.password_hash, user.full_name, user.date_of_birth, user.jurisdiction,
+      user.currency, user.role, user.kyc_status, user.email_verified, user.mfa_enabled, user.mfa_secret,
+      user.self_excluded_until, user.daily_deposit_limit, user.daily_loss_limit, user.pending_deposit_limit,
+      user.pending_deposit_effective, user.pending_loss_limit, user.pending_loss_effective,
+      user.terms_accepted_at, user.signup_ip, user.created_at,
+    ],
   );
+  await db.none(`INSERT INTO wallets (user_id, balance, currency) VALUES ($1, $2, $3)`, [user.id, 100_000, user.currency]);
   return user;
 }
 
 /** Crea un partido con un mercado 1x2 y devuelve ids útiles. */
-export function makeMatchWith1x2(
-  db: Database.Database,
+export async function makeMatchWith1x2(
+  db: Db,
   odds: { home: number; draw: number; away: number } = { home: 2.0, draw: 3.3, away: 3.5 },
 ) {
   const homeTeam = nanoid();
   const awayTeam = nanoid();
-  db.prepare(`INSERT INTO teams (id,name,code,grp) VALUES (?,?,?,?)`).run(homeTeam, 'Local FC', 'LOC', 'A');
-  db.prepare(`INSERT INTO teams (id,name,code,grp) VALUES (?,?,?,?)`).run(awayTeam, 'Visita FC', 'VIS', 'A');
+  await db.none(`INSERT INTO teams (id,name,code,grp) VALUES ($1,$2,$3,$4)`, [homeTeam, 'Local FC', 'LOC', 'A']);
+  await db.none(`INSERT INTO teams (id,name,code,grp) VALUES ($1,$2,$3,$4)`, [awayTeam, 'Visita FC', 'VIS', 'A']);
   const matchId = nanoid();
-  db.prepare(
+  await db.none(
     `INSERT INTO matches (id,stage,grp,home_team,away_team,kickoff,venue,status)
-     VALUES (?,?,?,?,?,?,?,?)`,
-  ).run(matchId, 'group', 'A', homeTeam, awayTeam, '2026-06-20T18:00:00Z', 'Estadio', 'scheduled');
-  const marketId = nanoid();
-  db.prepare(`INSERT INTO markets (id,match_id,type,name,status) VALUES (?,?,?,?,'open')`).run(
-    marketId,
-    matchId,
-    '1x2',
-    'Resultado (1X2)',
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'scheduled')`,
+    [matchId, 'group', 'A', homeTeam, awayTeam, '2026-06-20T18:00:00Z', 'Estadio'],
   );
+  const marketId = nanoid();
+  await db.none(`INSERT INTO markets (id,match_id,type,name,status) VALUES ($1,$2,'1x2','Resultado (1X2)','open')`, [marketId, matchId]);
   const selHome = nanoid();
   const selDraw = nanoid();
   const selAway = nanoid();
-  db.prepare(`INSERT INTO selections (id,market_id,name,odds) VALUES (?,?,?,?)`).run(selHome, marketId, 'Local', odds.home);
-  db.prepare(`INSERT INTO selections (id,market_id,name,odds) VALUES (?,?,?,?)`).run(selDraw, marketId, 'Empate', odds.draw);
-  db.prepare(`INSERT INTO selections (id,market_id,name,odds) VALUES (?,?,?,?)`).run(selAway, marketId, 'Visitante', odds.away);
+  await db.none(`INSERT INTO selections (id,market_id,name,odds) VALUES ($1,$2,'Local',$3)`, [selHome, marketId, odds.home]);
+  await db.none(`INSERT INTO selections (id,market_id,name,odds) VALUES ($1,$2,'Empate',$3)`, [selDraw, marketId, odds.draw]);
+  await db.none(`INSERT INTO selections (id,market_id,name,odds) VALUES ($1,$2,'Visitante',$3)`, [selAway, marketId, odds.away]);
   return { matchId, marketId, selHome, selDraw, selAway, odds };
 }

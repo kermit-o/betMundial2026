@@ -5,9 +5,9 @@ cuatro prioridades de producto:
 
 | Pilar | Cómo se aborda |
 |-------|----------------|
-| **Estabilidad** | Operaciones financieras atómicas (transacciones SQLite), validación de entrada con Zod en todos los endpoints, manejo de errores centralizado, apagado controlado (graceful shutdown) y suite de pruebas automatizadas. |
+| **Estabilidad** | Operaciones financieras atómicas (transacciones PostgreSQL), validación de entrada con Zod en todos los endpoints, manejo de errores centralizado, apagado controlado (graceful shutdown) y suite de pruebas automatizadas. |
 | **Cumplimiento normativo** | Motor de reglas por jurisdicción (edad mínima, moneda, impuestos, límites), verificación KYC, bloqueo geográfico, juego responsable (límites de depósito/pérdida, autoexclusión) y registro de auditoría inmutable. |
-| **Baja latencia** | Base de datos en proceso `better-sqlite3` (lecturas/escrituras sub‑milisegundo), sentencias preparadas, cuotas en memoria y **push de cuotas en vivo por WebSocket** (sin polling). |
+| **Baja latencia** | PostgreSQL con *connection pooling* y consultas parametrizadas, cuotas en memoria y **push de cuotas en vivo por WebSocket** (sin polling). |
 | **Protección antifraude** | Rate limiting por IP (ámbitos separados), control de velocidad de apuestas, *risk scoring* multiseñal (stake, cuotas extremas, multicuenta por IP, cuentas nuevas), detección AML de transacciones grandes y bloqueo automático de apuestas de alto riesgo. |
 
 ### Funcionalidades de producto
@@ -44,7 +44,7 @@ betMundial2026/
 │   ├── src/
 │   │   ├── config.ts           # Configuración tipada desde entorno
 │   │   ├── app.ts / index.ts    # App Express y arranque (HTTP + WS + shutdown)
-│   │   ├── db/                  # Esquema SQLite, conexión, seed
+│   │   ├── db/                  # Esquema PostgreSQL, adaptador async (pg), seed
 │   │   ├── auth/                # Registro, login, JWT
 │   │   ├── compliance/          # Jurisdicciones, KYC, edad, límites responsables
 │   │   ├── fraud/               # Risk scoring, velocity, AML, flags
@@ -63,10 +63,11 @@ betMundial2026/
 
 ### Modelo de datos (resumen)
 
-`users` · `wallets` · `transactions` (ledger) · `teams` · `matches` · `markets` ·
-`selections` · `bets` · `audit_log` · `fraud_flags`.
+`users` · `wallets` · `transactions` (ledger) · `payment_intents` · `kyc_cases` ·
+`auth_tokens` · `teams` · `matches` · `markets` · `selections` · `bets` ·
+`bet_legs` · `audit_log` · `fraud_flags`.
 
-Todos los importes se almacenan en **minor units** (céntimos, enteros) para evitar
+Todos los importes se almacenan en **minor units** (céntimos, `BIGINT`) para evitar
 errores de coma flotante en operaciones monetarias.
 
 ---
@@ -76,15 +77,19 @@ errores de coma flotante en operaciones monetarias.
 ### Requisitos
 - Node.js ≥ 20 (probado en 22)
 - npm ≥ 10
+- PostgreSQL ≥ 14 (local o gestionado). La forma más rápida: `docker compose up db`.
 
 ### Instalación y arranque (desarrollo)
 
 ```bash
-cp .env.example .env          # ajusta secretos y reglas si lo necesitas
+cp .env.example .env          # define DATABASE_URL, secretos y reglas
 npm install                   # instala los dos workspaces
-npm run seed                  # crea datos del Mundial 2026 + usuario admin
+npm run seed                  # aplica el esquema + datos del Mundial 2026 + admin
 npm run dev                   # API en :4000 y web en :5173 (con proxy)
 ```
+
+El esquema se crea de forma idempotente al conectar; `DATABASE_URL` por defecto
+apunta a `postgresql://bet:betpass@localhost:5432/betmundial`.
 
 - Web: http://localhost:5173
 - API: http://localhost:4000/api
@@ -197,5 +202,5 @@ npm test                      # 24 pruebas: cumplimiento, apuestas, fraude, API 
 - Servir siempre tras TLS; fijar `Secure`/`SameSite` en cookies si se migran sesiones.
 - Reemplazar el rate limiter en memoria por Redis en despliegues multi‑instancia.
 - Integrar proveedores reales de KYC/AML y pasarela de pago con conciliación.
-- Migrar de SQLite a Postgres si se requiere alta concurrencia/escalado horizontal.
+- Añadir Redis para rate limiting distribuido y réplicas de lectura de PostgreSQL si se requiere escalado horizontal.
 - Revisión de seguridad y *pentest* previos a producción.

@@ -1,6 +1,9 @@
-import type Database from 'better-sqlite3';
+import type { Executor } from '../db/index.js';
 import { AppError, type User } from '../types.js';
+import { isoAgo } from '../utils/time.js';
 import { getJurisdictionRule } from './jurisdictions.js';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Edad en años completos a partir de fecha de nacimiento ISO. */
 export function ageFromDob(dob: string, now = new Date()): number {
@@ -25,7 +28,7 @@ export function isSelfExcluded(user: Pick<User, 'self_excluded_until'>, now = ne
  * Comprobaciones que deben pasar ANTES de aceptar una apuesta con dinero real.
  * Lanza AppError con el motivo concreto si alguna falla.
  */
-export function assertCanBet(_db: Database.Database, user: User, now = new Date()): void {
+export function assertCanBet(user: User, now = new Date()): void {
   if (isSelfExcluded(user, now)) {
     throw new AppError(403, 'self_excluded', 'Cuenta en periodo de autoexclusión; no se pueden realizar apuestas.');
   }
@@ -42,37 +45,33 @@ export function assertCanBet(_db: Database.Database, user: User, now = new Date(
 }
 
 /** Importe depositado por el usuario en las últimas 24h (minor units). */
-export function depositsLast24h(db: Database.Database, userId: string): number {
-  const row = db
-    .prepare(
-      `SELECT COALESCE(SUM(amount), 0) AS total
-         FROM transactions
-        WHERE user_id = ? AND type = 'deposit'
-          AND created_at >= datetime('now', '-1 day')`,
-    )
-    .get(userId) as { total: number };
-  return row.total;
+export async function depositsLast24h(db: Executor, userId: string): Promise<number> {
+  const row = await db.oneOrNone<{ total: number }>(
+    `SELECT COALESCE(SUM(amount), 0) AS total
+       FROM transactions
+      WHERE user_id = $1 AND type = 'deposit' AND created_at >= $2`,
+    [userId, isoAgo(DAY_MS)],
+  );
+  return row?.total ?? 0;
 }
 
 /** Pérdida neta (stake - payouts) en las últimas 24h (minor units, positiva = pérdida). */
-export function netLossLast24h(db: Database.Database, userId: string): number {
-  const row = db
-    .prepare(
-      `SELECT COALESCE(SUM(CASE WHEN type = 'bet_stake' THEN -amount
-                                WHEN type = 'bet_payout' THEN -amount
-                                ELSE 0 END), 0) AS net
-         FROM transactions
-        WHERE user_id = ? AND type IN ('bet_stake','bet_payout')
-          AND created_at >= datetime('now', '-1 day')`,
-    )
-    .get(userId) as { net: number };
+export async function netLossLast24h(db: Executor, userId: string): Promise<number> {
+  const row = await db.oneOrNone<{ net: number }>(
+    `SELECT COALESCE(SUM(CASE WHEN type = 'bet_stake' THEN -amount
+                              WHEN type = 'bet_payout' THEN -amount
+                              ELSE 0 END), 0) AS net
+       FROM transactions
+      WHERE user_id = $1 AND type IN ('bet_stake','bet_payout') AND created_at >= $2`,
+    [userId, isoAgo(DAY_MS)],
+  );
   // amount es negativo para stake (carga) y positivo para payout (abono);
   // net = stake - payout => pérdida neta positiva.
-  return row.net;
+  return row?.net ?? 0;
 }
 
-export function assertDepositWithinLimit(db: Database.Database, user: User, amount: number): void {
-  const already = depositsLast24h(db, user.id);
+export async function assertDepositWithinLimit(db: Executor, user: User, amount: number): Promise<void> {
+  const already = await depositsLast24h(db, user.id);
   if (already + amount > user.daily_deposit_limit) {
     throw new AppError(
       403,
@@ -82,9 +81,9 @@ export function assertDepositWithinLimit(db: Database.Database, user: User, amou
   }
 }
 
-export function assertLossLimitNotExceeded(db: Database.Database, user: User, additionalStake: number): void {
+export async function assertLossLimitNotExceeded(db: Executor, user: User, additionalStake: number): Promise<void> {
   if (user.daily_loss_limit == null) return;
-  const currentNetLoss = netLossLast24h(db, user.id);
+  const currentNetLoss = await netLossLast24h(db, user.id);
   if (currentNetLoss + additionalStake > user.daily_loss_limit) {
     throw new AppError(
       403,

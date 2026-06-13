@@ -24,47 +24,48 @@ describe('TOTP', () => {
 });
 
 describe('seguridad de cuenta', () => {
-  it('restablece la contraseña con token de un solo uso', () => {
-    const db = freshDb();
-    const user = makeUser(db, { email: 'reset@test.com', password_hash: bcrypt.hashSync('OldPass1!', 8) });
-    const { token } = requestPasswordReset(db, 'reset@test.com');
+  it('restablece la contraseña con token de un solo uso', async () => {
+    const db = await freshDb();
+    const user = await makeUser(db, { email: 'reset@test.com', password_hash: bcrypt.hashSync('OldPass1!', 8) });
+    const { token } = await requestPasswordReset(db, 'reset@test.com');
     expect(token).toBeTruthy();
-    resetPassword(db, token!, 'NewPass1!');
-    const updated = findUserById(db, user.id)!;
+    await resetPassword(db, token!, 'NewPass1!');
+    const updated = (await findUserById(db, user.id))!;
     expect(bcrypt.compareSync('NewPass1!', updated.password_hash)).toBe(true);
-    // El token no puede reutilizarse.
-    expect(() => resetPassword(db, token!, 'Another1!')).toThrowError(AppError);
+    await expect(resetPassword(db, token!, 'Another1!')).rejects.toBeInstanceOf(AppError);
+    await db.close();
   });
 
-  it('no revela si el email existe', () => {
-    const db = freshDb();
-    const res = requestPasswordReset(db, 'noexiste@test.com');
+  it('no revela si el email existe', async () => {
+    const db = await freshDb();
+    const res = await requestPasswordReset(db, 'noexiste@test.com');
     expect(res.token).toBeNull();
+    await db.close();
   });
 
-  it('verifica el email mediante token', () => {
-    const db = freshDb();
-    const user = makeUser(db, { email_verified: 0 });
-    const { token } = requestEmailVerification(db, user);
-    verifyEmail(db, token);
-    expect(findUserById(db, user.id)!.email_verified).toBe(1);
+  it('verifica el email mediante token', async () => {
+    const db = await freshDb();
+    const user = await makeUser(db, { email_verified: 0 });
+    const { token } = await requestEmailVerification(db, user);
+    await verifyEmail(db, token);
+    expect((await findUserById(db, user.id))!.email_verified).toBe(1);
+    await db.close();
   });
 
-  it('activa MFA y luego exige el código en el login', () => {
-    const db = freshDb();
-    const user = makeUser(db, { email: 'mfa@test.com', password_hash: bcrypt.hashSync('Password1!', 8) });
-    const { secret } = setupMfa(db, user);
-    enableMfa(db, findUserById(db, user.id)!, totp(secret));
+  it('activa MFA y luego exige el código en el login', async () => {
+    const db = await freshDb();
+    const user = await makeUser(db, { email: 'mfa@test.com', password_hash: bcrypt.hashSync('Password1!', 8) });
+    const { secret } = await setupMfa(db, user);
+    await enableMfa(db, (await findUserById(db, user.id))!, totp(secret));
 
-    // Login sin código -> mfa_required
     try {
-      login(db, 'mfa@test.com', 'Password1!', null);
+      await login(db, 'mfa@test.com', 'Password1!', null);
       expect.fail('debería pedir MFA');
     } catch (e) {
       expect((e as AppError).code).toBe('mfa_required');
     }
-    // Login con código válido -> ok
-    const ok = login(db, 'mfa@test.com', 'Password1!', null, totp(secret));
+    const ok = await login(db, 'mfa@test.com', 'Password1!', null, totp(secret));
     expect(ok.token).toBeTruthy();
+    await db.close();
   });
 });

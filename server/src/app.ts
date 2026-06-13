@@ -3,15 +3,15 @@ import cors from 'cors';
 import helmet from 'helmet';
 import fs from 'node:fs';
 import path from 'node:path';
-import type Database from 'better-sqlite3';
+import type { Db } from './db/index.js';
 import { buildRouter } from './routes/index.js';
 import { rateLimit } from './middleware/rateLimit.js';
-import { errorHandler } from './middleware/error.js';
+import { errorHandler, asyncHandler } from './middleware/error.js';
 import { requestLog } from './middleware/requestLog.js';
 import { renderMetrics } from './observability/metrics.js';
 import { config, isProd } from './config.js';
 
-export function createApp(db: Database.Database): Express {
+export function createApp(db: Db): Express {
   const app = express();
 
   app.disable('x-powered-by');
@@ -48,19 +48,25 @@ export function createApp(db: Database.Database): Express {
 
   // Sondas de salud (sin /api para que orquestadores las usen directamente).
   app.get('/healthz', (_req, res) => res.json({ status: 'ok' }));
-  app.get('/readyz', (_req, res) => {
-    try {
-      db.prepare('SELECT 1 AS ok').get();
-      res.json({ status: 'ready' });
-    } catch {
-      res.status(503).json({ status: 'unavailable' });
-    }
-  });
+  app.get(
+    '/readyz',
+    asyncHandler(async (_req, res) => {
+      try {
+        await db.query('SELECT 1 AS ok');
+        res.json({ status: 'ready' });
+      } catch {
+        res.status(503).json({ status: 'unavailable' });
+      }
+    }),
+  );
   if (config.metricsEnabled) {
-    app.get('/metrics', (_req, res) => {
-      res.setHeader('Content-Type', 'text/plain; version=0.0.4');
-      res.send(renderMetrics(db));
-    });
+    app.get(
+      '/metrics',
+      asyncHandler(async (_req, res) => {
+        res.setHeader('Content-Type', 'text/plain; version=0.0.4');
+        res.send(await renderMetrics(db));
+      }),
+    );
   }
 
   // Guardamos el cuerpo crudo para poder verificar firmas de webhooks.
