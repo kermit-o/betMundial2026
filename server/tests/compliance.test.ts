@@ -30,20 +30,22 @@ describe('cumplimiento normativo', () => {
     expect(isSelfExcluded({ self_excluded_until: null })).toBe(false);
   });
 
-  it('assertCanBet exige KYC verificado', () => {
-    const db = freshDb();
-    const user = makeUser(db, { kyc_status: 'pending' });
-    expect(() => assertCanBet(db, user)).toThrowError(AppError);
+  it('assertCanBet exige KYC verificado', async () => {
+    const db = await freshDb();
+    const user = await makeUser(db, { kyc_status: 'pending' });
+    expect(() => assertCanBet(user)).toThrowError(AppError);
+    await db.close();
   });
 
-  it('assertCanBet bloquea usuario autoexcluido', () => {
-    const db = freshDb();
-    const user = makeUser(db, { self_excluded_until: new Date(Date.now() + 86_400_000).toISOString() });
+  it('assertCanBet bloquea usuario autoexcluido', async () => {
+    const db = await freshDb();
+    const user = await makeUser(db, { self_excluded_until: new Date(Date.now() + 86_400_000).toISOString() });
     try {
-      assertCanBet(db, user);
+      assertCanBet(user);
       expect.fail('debería lanzar');
     } catch (e) {
       expect((e as AppError).code).toBe('self_excluded');
     }
+    await db.close();
   });
 });

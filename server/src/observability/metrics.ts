@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type { Executor } from '../db/index.js';
 
 /**
  * Métricas en proceso expuestas en formato de texto Prometheus. Cubre tráfico
@@ -43,36 +43,39 @@ export function observeLatency(name: string, labels: Labels, ms: number): void {
 }
 
 /** Gauges de negocio leídos de la BD en el momento del scrape. */
-function businessGauges(db: Database.Database): string[] {
+async function businessGauges(db: Executor): Promise<string[]> {
   const out: string[] = [];
-  const q = (sql: string): number => (db.prepare(sql).get() as { v: number }).v;
+  const q = async (sql: string): Promise<number> => {
+    const row = await db.oneOrNone<{ v: number }>(sql);
+    return Number(row?.v ?? 0);
+  };
   try {
     out.push('# HELP bet_users_total Número de usuarios registrados.');
     out.push('# TYPE bet_users_total gauge');
-    out.push(`bet_users_total ${q('SELECT COUNT(*) AS v FROM users')}`);
+    out.push(`bet_users_total ${await q('SELECT COUNT(*)::int AS v FROM users')}`);
 
     out.push('# HELP bet_open_bets_total Apuestas abiertas.');
     out.push('# TYPE bet_open_bets_total gauge');
-    out.push(`bet_open_bets_total ${q("SELECT COUNT(*) AS v FROM bets WHERE status='open'")}`);
+    out.push(`bet_open_bets_total ${await q("SELECT COUNT(*)::int AS v FROM bets WHERE status='open'")}`);
 
     out.push('# HELP bet_open_liability_minor Exposición abierta (pago potencial, minor units).');
     out.push('# TYPE bet_open_liability_minor gauge');
-    out.push(`bet_open_liability_minor ${q("SELECT COALESCE(SUM(potential_payout),0) AS v FROM bets WHERE status='open'")}`);
+    out.push(`bet_open_liability_minor ${await q("SELECT COALESCE(SUM(potential_payout),0) AS v FROM bets WHERE status='open'")}`);
 
     out.push('# HELP bet_fraud_flags_total Banderas de fraude registradas.');
     out.push('# TYPE bet_fraud_flags_total gauge');
-    out.push(`bet_fraud_flags_total ${q('SELECT COUNT(*) AS v FROM fraud_flags')}`);
+    out.push(`bet_fraud_flags_total ${await q('SELECT COUNT(*)::int AS v FROM fraud_flags')}`);
 
     out.push('# HELP bet_wallet_balance_minor Suma de saldos de carteras (minor units).');
     out.push('# TYPE bet_wallet_balance_minor gauge');
-    out.push(`bet_wallet_balance_minor ${q('SELECT COALESCE(SUM(balance),0) AS v FROM wallets')}`);
+    out.push(`bet_wallet_balance_minor ${await q('SELECT COALESCE(SUM(balance),0) AS v FROM wallets')}`);
   } catch {
     /* la BD podría no estar lista; omitir gauges */
   }
   return out;
 }
 
-export function renderMetrics(db: Database.Database): string {
+export async function renderMetrics(db: Executor): Promise<string> {
   const lines: string[] = [];
 
   lines.push('# HELP bet_http_requests_total Total de peticiones HTTP.');
@@ -98,7 +101,7 @@ export function renderMetrics(db: Database.Database): string {
     lines.push(`bet_http_request_duration_ms_count${suffix} ${histogramCount.get(k) ?? 0}`);
   }
 
-  lines.push(...businessGauges(db));
+  lines.push(...(await businessGauges(db)));
   return lines.join('\n') + '\n';
 }
 

@@ -1,32 +1,36 @@
-import type Database from 'better-sqlite3';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Server } from 'node:http';
+import type { Db } from '../db/index.js';
 import type { Selection } from '../types.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Motor de cuotas en vivo. Ajusta ligeramente las cuotas de los mercados abiertos
- * a intervalos cortos y publica los cambios por WebSocket para baja latencia
- * (los clientes no hacen polling). En producción el ajuste vendría del modelo de
- * trading/riesgo; aquí simulamos movimientos acotados y manteniendo el margen.
+ * a intervalos cortos y publica los cambios por WebSocket para baja latencia.
  */
 export class OddsEngine {
   private wss: WebSocketServer;
   private timer: NodeJS.Timeout | null = null;
+  private ticking = false;
 
   constructor(
-    private db: Database.Database,
+    private db: Db,
     server: Server,
     private intervalMs = 3000,
   ) {
     this.wss = new WebSocketServer({ server, path: '/ws/odds' });
     this.wss.on('connection', (ws) => {
-      ws.send(JSON.stringify({ type: 'snapshot', data: this.snapshot() }));
+      this.snapshot()
+        .then((data) => ws.send(JSON.stringify({ type: 'snapshot', data })))
+        .catch(() => {});
     });
   }
 
   start(): void {
     if (this.timer) return;
-    this.timer = setInterval(() => this.tick(), this.intervalMs);
+    this.timer = setInterval(() => {
+      void this.tick();
+    }, this.intervalMs);
     this.timer.unref?.();
   }
 
@@ -37,41 +41,40 @@ export class OddsEngine {
     this.wss.close();
   }
 
-  /** Estado actual de cuotas de los mercados abiertos. */
-  private snapshot(): Array<{ selectionId: string; marketId: string; odds: number }> {
-    return this.db
-      .prepare(
-        `SELECT s.id AS selectionId, s.market_id AS marketId, s.odds AS odds
-           FROM selections s JOIN markets m ON m.id = s.market_id
-          WHERE m.status = 'open'`,
-      )
-      .all() as Array<{ selectionId: string; marketId: string; odds: number }>;
+  private async snapshot(): Promise<Array<{ selectionId: string; marketId: string; odds: number }>> {
+    return this.db.query<{ selectionId: string; marketId: string; odds: number }>(
+      `SELECT s.id AS "selectionId", s.market_id AS "marketId", s.odds AS odds
+         FROM selections s JOIN markets m ON m.id = s.market_id
+        WHERE m.status = 'open'`,
+    );
   }
 
-  private tick(): void {
-    const open = this.db
-      .prepare(
+  private async tick(): Promise<void> {
+    if (this.ticking) return;
+    this.ticking = true;
+    try {
+      const open = await this.db.query<Selection>(
         `SELECT s.* FROM selections s JOIN markets m ON m.id = s.market_id WHERE m.status = 'open'`,
-      )
-      .all() as Selection[];
-    if (open.length === 0) return;
+      );
+      if (open.length === 0) return;
 
-    const updates: Array<{ selectionId: string; marketId: string; odds: number }> = [];
-    const update = this.db.prepare(`UPDATE selections SET odds = ? WHERE id = ?`);
-
-    // Mover un subconjunto aleatorio de selecciones (mercado realista).
-    for (const sel of open) {
-      if (Math.random() > 0.3) continue;
-      const driftPct = (Math.random() - 0.5) * 0.04; // ±2%
-      let next = Math.round(sel.odds * (1 + driftPct) * 100) / 100;
-      next = Math.min(Math.max(next, 1.01), 100); // límites de seguridad
-      if (next !== sel.odds) {
-        update.run(next, sel.id);
-        updates.push({ selectionId: sel.id, marketId: sel.market_id, odds: next });
+      const updates: Array<{ selectionId: string; marketId: string; odds: number }> = [];
+      for (const sel of open) {
+        if (Math.random() > 0.3) continue;
+        const driftPct = (Math.random() - 0.5) * 0.04; // ±2%
+        let next = Math.round(sel.odds * (1 + driftPct) * 100) / 100;
+        next = Math.min(Math.max(next, 1.01), 100);
+        if (next !== sel.odds) {
+          await this.db.none(`UPDATE selections SET odds = $1 WHERE id = $2`, [next, sel.id]);
+          updates.push({ selectionId: sel.id, marketId: sel.market_id, odds: next });
+        }
       }
+      if (updates.length > 0) this.broadcast({ type: 'odds', data: updates });
+    } catch (err) {
+      logger.warn('odds_tick_error', { error: String(err) });
+    } finally {
+      this.ticking = false;
     }
-
-    if (updates.length > 0) this.broadcast({ type: 'odds', data: updates });
   }
 
   private broadcast(message: unknown): void {

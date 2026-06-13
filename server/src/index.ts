@@ -8,7 +8,7 @@ import { logger } from './utils/logger.js';
 // Falla rápido si la configuración de producción es insegura.
 assertProductionConfig();
 
-const db = getDb();
+const db = await getDb();
 const app = createApp(db);
 const server = http.createServer(app);
 
@@ -31,8 +31,7 @@ function shutdown(signal: string): void {
   logger.info('server_shutdown', { signal });
   oddsEngine.stop();
   server.close(() => {
-    closeDb();
-    process.exit(0);
+    void closeDb().finally(() => process.exit(0));
   });
   // Salida forzada si algo se cuelga.
   setTimeout(() => process.exit(1), 10_000).unref();

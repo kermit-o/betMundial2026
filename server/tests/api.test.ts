@@ -1,15 +1,21 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
-import { createInMemoryDb } from '../src/db/index.js';
+import type { Express } from 'express';
+import { createTestDb, type Db } from '../src/db/index.js';
 import { createApp } from '../src/app.js';
 import { seed } from '../src/db/seed.js';
 
 describe('API e2e', () => {
-  const db = createInMemoryDb();
-  seed(db);
-  const app = createApp(db);
-
+  let db: Db;
+  let app: Express;
   let token = '';
+
+  beforeAll(async () => {
+    db = await createTestDb();
+    await seed(db);
+    app = createApp(db);
+  });
+  afterAll(async () => { await db.close(); });
 
   it('GET /api/health responde ok', async () => {
     const res = await request(app).get('/api/health');
@@ -74,10 +80,8 @@ describe('API e2e', () => {
     const matches = (await request(app).get('/api/matches')).body.matches;
     const selection = matches[0].markets[0].selections[0];
 
-    // Depositar
     await request(app).post('/api/wallet/deposit').set('Authorization', `Bearer ${token}`).send({ amount: 20_000 });
 
-    // Apostar sin KYC -> bloqueado
     const blocked = await request(app)
       .post('/api/bets')
       .set('Authorization', `Bearer ${token}`)
@@ -85,14 +89,12 @@ describe('API e2e', () => {
     expect(blocked.status).toBe(403);
     expect(blocked.body.error.code).toBe('kyc_required');
 
-    // Completar KYC
     const kyc = await request(app)
       .post('/api/me/kyc')
       .set('Authorization', `Bearer ${token}`)
       .send({ documentType: 'national_id', documentNumber: '12345678Z', fullNameOnDocument: 'María García' });
     expect(kyc.body.kyc_status).toBe('verified');
 
-    // Apostar de nuevo -> ok
     const ok = await request(app)
       .post('/api/bets')
       .set('Authorization', `Bearer ${token}`)

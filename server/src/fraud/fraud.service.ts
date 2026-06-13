@@ -1,42 +1,43 @@
-import type Database from 'better-sqlite3';
 import { nanoid } from 'nanoid';
 import { config } from '../config.js';
+import type { Executor } from '../db/index.js';
 import { AppError, type User } from '../types.js';
 import { audit } from '../utils/audit.js';
+import { isoAgo, nowIso } from '../utils/time.js';
 
 export type Severity = 'low' | 'medium' | 'high';
 
-export function raiseFlag(
-  db: Database.Database,
+export async function raiseFlag(
+  db: Executor,
   userId: string | null,
   type: string,
   severity: Severity,
   detail: unknown,
-): void {
-  db.prepare(
-    `INSERT INTO fraud_flags (id, user_id, type, severity, detail) VALUES (?, ?, ?, ?, ?)`,
-  ).run(nanoid(), userId, type, severity, JSON.stringify(detail));
-  audit(db, 'fraud_flag', { userId, detail: { type, severity, detail } });
+): Promise<void> {
+  await db.none(
+    `INSERT INTO fraud_flags (id, user_id, type, severity, detail, created_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+    [nanoid(), userId, type, severity, JSON.stringify(detail), nowIso()],
+  );
+  await audit(db, 'fraud_flag', { userId, detail: { type, severity, detail } });
 }
 
 /** Nº de apuestas del usuario en el último minuto. */
-function betsLastMinute(db: Database.Database, userId: string): number {
-  const row = db
-    .prepare(
-      `SELECT COUNT(*) AS n FROM bets
-        WHERE user_id = ? AND placed_at >= datetime('now', '-1 minute')`,
-    )
-    .get(userId) as { n: number };
-  return row.n;
+async function betsLastMinute(db: Executor, userId: string): Promise<number> {
+  const row = await db.oneOrNone<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM bets WHERE user_id = $1 AND placed_at >= $2`,
+    [userId, isoAgo(60_000)],
+  );
+  return row?.n ?? 0;
 }
 
 /** Cuentas distintas que comparten la IP de registro (señal de multicuenta). */
-function accountsSharingIp(db: Database.Database, ip: string | null, excludeUserId: string): number {
+async function accountsSharingIp(db: Executor, ip: string | null, excludeUserId: string): Promise<number> {
   if (!ip) return 0;
-  const row = db
-    .prepare(`SELECT COUNT(*) AS n FROM users WHERE signup_ip = ? AND id != ?`)
-    .get(ip, excludeUserId) as { n: number };
-  return row.n;
+  const row = await db.oneOrNone<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM users WHERE signup_ip = $1 AND id != $2`,
+    [ip, excludeUserId],
+  );
+  return row?.n ?? 0;
 }
 
 export interface BetRiskContext {
@@ -56,12 +57,12 @@ export interface RiskAssessment {
  * Evalúa el riesgo de una apuesta combinando varias señales. Devuelve una
  * puntuación 0..100. El llamador decide aceptar, marcar o bloquear.
  */
-export function assessBetRisk(db: Database.Database, ctx: BetRiskContext): RiskAssessment {
+export async function assessBetRisk(db: Executor, ctx: BetRiskContext): Promise<RiskAssessment> {
   const reasons: string[] = [];
   let score = 0;
 
   // 1. Velocity: ráfaga de apuestas en poco tiempo.
-  const recent = betsLastMinute(db, ctx.user.id);
+  const recent = await betsLastMinute(db, ctx.user.id);
   if (recent >= config.fraudMaxBetsPerMinute) {
     score += 40;
     reasons.push(`velocity_alta:${recent}_apuestas/min`);
@@ -86,7 +87,7 @@ export function assessBetRisk(db: Database.Database, ctx: BetRiskContext): RiskA
   }
 
   // 4. Multicuenta: varias cuentas con la misma IP de registro.
-  const shared = accountsSharingIp(db, ctx.ip, ctx.user.id);
+  const shared = await accountsSharingIp(db, ctx.ip, ctx.user.id);
   if (shared >= 3) {
     score += 25;
     reasons.push(`multicuenta_ip:${shared}`);
@@ -96,7 +97,7 @@ export function assessBetRisk(db: Database.Database, ctx: BetRiskContext): RiskA
   }
 
   // 5. Cuenta muy reciente apostando fuerte (cuentas "mula").
-  const accountAgeMs = Date.now() - new Date(ctx.user.created_at + 'Z').getTime();
+  const accountAgeMs = Date.now() - new Date(ctx.user.created_at).getTime();
   if (accountAgeMs < 10 * 60 * 1000 && ctx.stake >= ctx.maxStake * 0.5) {
     score += 15;
     reasons.push('cuenta_nueva_stake_alto');
@@ -108,10 +109,10 @@ export function assessBetRisk(db: Database.Database, ctx: BetRiskContext): RiskA
 /** Umbral por encima del cual una apuesta se rechaza directamente. */
 export const HARD_BLOCK_THRESHOLD = 80;
 
-export function enforceBetRisk(db: Database.Database, ctx: BetRiskContext): RiskAssessment {
-  const assessment = assessBetRisk(db, ctx);
+export async function enforceBetRisk(db: Executor, ctx: BetRiskContext): Promise<RiskAssessment> {
+  const assessment = await assessBetRisk(db, ctx);
   if (assessment.score >= HARD_BLOCK_THRESHOLD) {
-    raiseFlag(db, ctx.user.id, 'bet_blocked', 'high', assessment);
+    await raiseFlag(db, ctx.user.id, 'bet_blocked', 'high', assessment);
     throw new AppError(
       403,
       'bet_blocked_risk',
@@ -119,19 +120,19 @@ export function enforceBetRisk(db: Database.Database, ctx: BetRiskContext): Risk
     );
   }
   if (assessment.score >= 40) {
-    raiseFlag(db, ctx.user.id, 'bet_high_risk', 'medium', assessment);
+    await raiseFlag(db, ctx.user.id, 'bet_high_risk', 'medium', assessment);
   }
   return assessment;
 }
 
 /** Detección AML: transacciones grandes que requieren revisión. */
-export function screenTransaction(
-  db: Database.Database,
+export async function screenTransaction(
+  db: Executor,
   userId: string,
   type: string,
   amount: number,
-): void {
+): Promise<void> {
   if (Math.abs(amount) >= config.amlLargeTxThreshold) {
-    raiseFlag(db, userId, 'aml_large_transaction', 'high', { type, amount });
+    await raiseFlag(db, userId, 'aml_large_transaction', 'high', { type, amount });
   }
 }

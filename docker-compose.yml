@@ -1,4 +1,19 @@
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-bet}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-betpass}
+      POSTGRES_DB: ${POSTGRES_DB:-betmundial}
+    volumes:
+      - bet_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bet} -d ${POSTGRES_DB:-betmundial}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   api:
     build:
       context: .
@@ -7,14 +22,15 @@ services:
       NODE_ENV: production
       PORT: "4000"
       JWT_SECRET: ${JWT_SECRET:?define JWT_SECRET (>=32 chars) en .env}
-      DATABASE_PATH: /data/bet.db
+      DATABASE_URL: postgresql://${POSTGRES_USER:-bet}:${POSTGRES_PASSWORD:-betpass}@db:5432/${POSTGRES_DB:-betmundial}
       ALLOWED_JURISDICTIONS: ${ALLOWED_JURISDICTIONS:-ES,MX,CO,PE,AR,CL,UK,MT}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
       TRUST_PROXY: ${TRUST_PROXY:-1}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       PAYMENTS_WEBHOOK_SECRET: ${PAYMENTS_WEBHOOK_SECRET:?define PAYMENTS_WEBHOOK_SECRET en .env}
-    volumes:
-      - bet_data:/data
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       - "4000:4000"
     healthcheck:
@@ -42,4 +58,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  bet_data:
+  bet_pgdata:

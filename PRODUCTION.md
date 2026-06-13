@@ -10,9 +10,9 @@ Runbook de operación y checklist de *go-live*. Complementa al `README.md`.
 | Observabilidad (logs JSON, `/metrics`, `/healthz`, `/readyz`) | ✅ Listo | Prometheus + agregador de logs |
 | Endurecimiento de config (fail-fast, CORS allowlist, HSTS, trust proxy) | ✅ Listo | Ver §3 |
 | Empaquetado (Docker no-root, healthchecks, CI) | ✅ Listo | `docker compose up` |
+| Persistencia (PostgreSQL) | ✅ Listo | Esquema idempotente; pool `pg`; transacciones |
 | Pasarela de pago real | ⚠️ Pendiente | Interfaz `PaymentProvider` lista; falta implementación (Stripe/Adyen) |
 | KYC/AML real | ⚠️ Pendiente | Interfaz `KycProvider` lista; falta implementación (Onfido/SumSub) |
-| Persistencia a escala (PostgreSQL) | ⚠️ Pendiente | Hoy SQLite; ver §6 |
 | Rate limit distribuido (Redis) | ⚠️ Pendiente | Hoy en memoria (1 instancia) |
 | Licencia regulatoria | ⛔ Bloqueante | Requisito legal por jurisdicción |
 
@@ -21,10 +21,11 @@ Runbook de operación y checklist de *go-live*. Complementa al `README.md`.
 El arranque **falla** (`assertProductionConfig`) si no se cumplen:
 
 - `NODE_ENV=production`
+- `DATABASE_URL` — cadena de conexión PostgreSQL.
 - `JWT_SECRET` — secreto fuerte, ≥ 32 caracteres (usar un *secrets manager*).
 - `PAYMENTS_WEBHOOK_SECRET` — distinto del valor sandbox.
 - `CORS_ORIGINS` — lista explícita de orígenes (no `*`).
-- Recomendado: `TRUST_PROXY=1` tras un balanceador, `DATABASE_PATH` en volumen persistente.
+- Recomendado: `TRUST_PROXY=1` tras un balanceador.
 
 ## 3. Seguridad
 
@@ -63,15 +64,14 @@ secretos desde el gestor de secretos.
 
 ## 6. Camino a escala (siguientes pasos)
 
-1. **PostgreSQL**: migrar desde SQLite (la capa de servicios encapsula el acceso a
-   datos; el cambio principal es el driver y las transacciones). Habilita réplicas,
-   backups y escalado horizontal del API.
-2. **Redis**: respaldar el rate limiter y la caché de cuotas para múltiples
-   instancias.
-3. **Proveedores reales**: implementar `PaymentProvider` y `KycProvider` (las
+1. **Redis**: respaldar el rate limiter y la caché de cuotas para múltiples
+   instancias del API (hoy el rate limit es en memoria por instancia).
+2. **Proveedores reales**: implementar `PaymentProvider` y `KycProvider` (las
    interfaces ya existen) y registrar en el factory de `payments/index.ts`.
-4. **Feed deportivo**: integrar cuotas y resultados de un proveedor (Sportradar/
+3. **Feed deportivo**: integrar cuotas y resultados de un proveedor (Sportradar/
    Genius) y automatizar la liquidación.
+4. **Base de datos**: réplicas de lectura, backups y *connection pooling*
+   (p.ej. PgBouncer) según la carga del torneo.
 
 ## 7. Checklist de go-live
 

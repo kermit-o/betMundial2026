@@ -8,6 +8,22 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: bet
+          POSTGRES_PASSWORD: betpass
+          POSTGRES_DB: betmundial
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bet -d betmundial"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://bet:betpass@localhost:5432/betmundial
     steps:
       - uses: actions/checkout@v4
 
