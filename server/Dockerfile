@@ -18,8 +18,9 @@ FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
+# npm workspaces eleva las dependencias al node_modules raíz; Node las resuelve
+# hacia arriba desde /app/server/dist. (No existe /app/server/node_modules.)
 COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/server/node_modules ./server/node_modules
 COPY --from=build /app/server/dist ./server/dist
 COPY --from=build /app/server/package.json ./server/package.json
 
