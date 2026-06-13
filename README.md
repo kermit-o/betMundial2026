@@ -143,6 +143,10 @@ docker compose up --build     # API en :4000, web servida en :8080
 > **Producción**: consulta [`PRODUCTION.md`](./PRODUCTION.md) para el runbook,
 > la configuración obligatoria (`assertProductionConfig`), observabilidad y el
 > checklist de *go-live*. Plantillas legales en [`docs/legal/`](./docs/legal/).
+>
+> **Despliegue en Railway**: guía paso a paso en
+> [`DEPLOY-RAILWAY.md`](./DEPLOY-RAILWAY.md) (un solo servicio con el `Dockerfile`
+> raíz: Express sirve API + WebSocket + SPA, con Volume para la BD).
 
 ### Ejemplo: colocar una apuesta (simple o combinada)
 

@@ -36,3 +36,5 @@ jobs:
         run: docker build -f server/Dockerfile -t betmundial-api:ci .
       - name: Build de la imagen web
         run: docker build -f web/Dockerfile -t betmundial-web:ci .
+      - name: Build de la imagen combinada (Railway / un solo servicio)
+        run: docker build -f Dockerfile -t betmundial-allinone:ci .
