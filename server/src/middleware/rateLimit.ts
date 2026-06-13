@@ -1,10 +1,11 @@
 import type { NextFunction, Request, Response } from 'express';
 import { config } from '../config.js';
+import { getRedis } from '../infra/redis.js';
 
 /**
- * Rate limiter en memoria por clave (IP) con ventana deslizante simple.
- * Primera línea de defensa antifraude/DoS. En un despliegue multi-instancia
- * se respaldaría en Redis; aquí basta para una instancia con baja latencia.
+ * Rate limiter por clave (scope + IP) con ventana fija de 1 minuto.
+ * Primera línea de defensa antifraude/DoS. Si hay REDIS_URL, el contador se
+ * comparte entre instancias (Redis); si no, o si Redis falla, cae a memoria.
  */
 interface Bucket {
   count: number;
@@ -14,8 +15,33 @@ interface Bucket {
 const buckets = new Map<string, Bucket>();
 const WINDOW_MS = 60_000;
 
+interface Hit {
+  remaining: number;
+  limited: boolean;
+}
+
 function clientIp(req: Request): string {
   return (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'unknown';
+}
+
+function memoryHit(key: string, max: number): Hit {
+  const now = Date.now();
+  let bucket = buckets.get(key);
+  if (!bucket || bucket.resetAt <= now) {
+    bucket = { count: 0, resetAt: now + WINDOW_MS };
+    buckets.set(key, bucket);
+  }
+  bucket.count++;
+  return { remaining: Math.max(0, max - bucket.count), limited: bucket.count > max };
+}
+
+async function redisHit(key: string, max: number): Promise<Hit> {
+  const redis = getRedis()!;
+  const windowId = Math.floor(Date.now() / WINDOW_MS);
+  const rkey = `rl:${key}:${windowId}`;
+  const count = await redis.incr(rkey);
+  if (count === 1) await redis.pexpire(rkey, WINDOW_MS);
+  return { remaining: Math.max(0, max - count), limited: count > max };
 }
 
 /**
@@ -24,18 +50,22 @@ function clientIp(req: Request): string {
  * el tráfico general (que pasa por el limitador global).
  */
 export function rateLimit(maxPerMinute = config.rateLimitPerMinute, scope = 'global') {
-  return (req: Request, res: Response, next: NextFunction): void => {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const key = `${scope}:${clientIp(req)}`;
-    const now = Date.now();
-    let bucket = buckets.get(key);
-    if (!bucket || bucket.resetAt <= now) {
-      bucket = { count: 0, resetAt: now + WINDOW_MS };
-      buckets.set(key, bucket);
+    let hit: Hit;
+    if (getRedis()) {
+      try {
+        hit = await redisHit(key, maxPerMinute);
+      } catch {
+        hit = memoryHit(key, maxPerMinute); // Redis caído: protección local.
+      }
+    } else {
+      hit = memoryHit(key, maxPerMinute);
     }
-    bucket.count++;
+
     res.setHeader('X-RateLimit-Limit', String(maxPerMinute));
-    res.setHeader('X-RateLimit-Remaining', String(Math.max(0, maxPerMinute - bucket.count)));
-    if (bucket.count > maxPerMinute) {
+    res.setHeader('X-RateLimit-Remaining', String(hit.remaining));
+    if (hit.limited) {
       res.status(429).json({ error: { code: 'rate_limited', message: 'Demasiadas peticiones. Inténtelo más tarde.' } });
       return;
     }
@@ -43,7 +73,7 @@ export function rateLimit(maxPerMinute = config.rateLimitPerMinute, scope = 'glo
   };
 }
 
-// Limpieza periódica de buckets caducados para no crecer sin límite.
+// Limpieza periódica de buckets en memoria caducados para no crecer sin límite.
 setInterval(() => {
   const now = Date.now();
   for (const [key, b] of buckets) if (b.resetAt <= now) buckets.delete(key);

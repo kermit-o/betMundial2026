@@ -106,6 +106,23 @@ El depósito abre **Stripe Checkout**; al pagar, el webhook firma y abona el sal
 > previa. Usa claves de test salvo que tengas esa licencia. Los **retiros** quedan
 > en `pending`: el pago real a usuarios requiere Stripe Connect/Treasury.
 
+### 8. Escalado horizontal con Redis (opcional)
+Con una sola instancia no hace falta. Si subes las réplicas del servicio, añade un
+**Redis** (en Railway: *New → Database → Redis*) y define:
+
+| Variable | Valor |
+|----------|-------|
+| `REDIS_URL` | `${{Redis.REDIS_URL}}` (referencia al servicio Redis) |
+
+Con `REDIS_URL` definida, automáticamente:
+- el **rate-limit** pasa a ser un contador compartido entre instancias (antes era
+  por proceso);
+- las **cuotas en vivo** se difunden por pub/sub a los WebSocket de todas las
+  instancias, y un *lock* con TTL garantiza que sólo una instancia calcula y
+  persiste las cuotas (sin Redis, una sola instancia hace ambas cosas).
+
+Sin `REDIS_URL` todo sigue funcionando en modo de una sola instancia.
+
 ---
 
 ## Opción B — Railway CLI

@@ -60,6 +60,10 @@ export const config = {
   adminEmail: str('ADMIN_EMAIL', ''),
   adminPassword: process.env.ADMIN_PASSWORD ?? '',
 
+  // Redis (opcional): habilita rate-limit distribuido y difusión de cuotas
+  // multi-instancia. Vacío => modo de una sola instancia (memoria).
+  redisUrl: str('REDIS_URL', ''),
+
   // Pagos: proveedor activo y credenciales de Stripe (modo test o producción).
   paymentProvider: str('PAYMENT_PROVIDER', 'sandbox'),
   stripeSecretKey: str('STRIPE_SECRET_KEY', ''),

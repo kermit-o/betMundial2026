@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { config, assertProductionConfig } from './config.js';
 import { getDb, closeDb } from './db/index.js';
+import { closeRedis } from './infra/redis.js';
 import { createApp } from './app.js';
 import { OddsEngine } from './realtime/oddsEngine.js';
 import { logger } from './utils/logger.js';
@@ -31,7 +32,7 @@ function shutdown(signal: string): void {
   logger.info('server_shutdown', { signal });
   oddsEngine.stop();
   server.close(() => {
-    void closeDb().finally(() => process.exit(0));
+    void Promise.allSettled([closeDb(), closeRedis()]).finally(() => process.exit(0));
   });
   // Salida forzada si algo se cuelga.
   setTimeout(() => process.exit(1), 10_000).unref();
