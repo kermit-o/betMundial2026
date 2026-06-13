@@ -53,6 +53,8 @@ async function creditDeposit(db: Db, intent: PaymentIntent): Promise<void> {
 export interface InitiateResult {
   intent: PaymentIntent;
   balance: number;
+  /** Si el proveedor requiere checkout externo (p.ej. Stripe), URL a la que ir. */
+  redirectUrl?: string;
 }
 
 export async function initiateDeposit(
@@ -72,7 +74,7 @@ export async function initiateDeposit(
   const provider = getPaymentProvider();
   const id = nanoid();
   const now = nowIso();
-  const result = provider.createDeposit({ intentId: id, userId: user.id, amount, currency: user.currency });
+  const result = await provider.createDeposit({ intentId: id, userId: user.id, amount, currency: user.currency });
 
   const intent: PaymentIntent = {
     id,
@@ -94,7 +96,7 @@ export async function initiateDeposit(
     await creditDeposit(db, intent);
     intent.status = 'completed';
   }
-  return { intent, balance: await balanceOf(db, user.id) };
+  return { intent, balance: await balanceOf(db, user.id), redirectUrl: result.redirectUrl };
 }
 
 export async function initiatePayout(
@@ -115,7 +117,7 @@ export async function initiatePayout(
   const provider = getPaymentProvider();
   const id = nanoid();
   const now = nowIso();
-  const result = provider.createPayout({ intentId: id, userId: user.id, amount, currency: user.currency });
+  const result = await provider.createPayout({ intentId: id, userId: user.id, amount, currency: user.currency });
   const intent: PaymentIntent = {
     id,
     user_id: user.id,

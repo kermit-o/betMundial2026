@@ -1,5 +1,7 @@
+import { config } from '../config.js';
 import type { KycProvider, PaymentProvider } from './provider.js';
 import { SandboxKycProvider, SandboxPaymentProvider } from './sandbox.js';
+import { StripePaymentProvider } from './stripe.js';
 
 /**
  * Factory de proveedores. Selecciona la implementación según variables de
@@ -8,7 +10,13 @@ import { SandboxKycProvider, SandboxPaymentProvider } from './sandbox.js';
  */
 const paymentProviders: Record<string, () => PaymentProvider> = {
   sandbox: () => new SandboxPaymentProvider(),
-  // stripe: () => new StripePaymentProvider(...),
+  stripe: () =>
+    new StripePaymentProvider({
+      secretKey: config.stripeSecretKey,
+      webhookSecret: config.stripeWebhookSecret,
+      successUrl: config.stripeSuccessUrl,
+      cancelUrl: config.stripeCancelUrl,
+    }),
 };
 
 const kycProviders: Record<string, () => KycProvider> = {
@@ -21,7 +29,7 @@ let kycInstance: KycProvider | null = null;
 
 export function getPaymentProvider(): PaymentProvider {
   if (!paymentInstance) {
-    const name = process.env.PAYMENT_PROVIDER ?? 'sandbox';
+    const name = config.paymentProvider;
     const factory = paymentProviders[name];
     if (!factory) throw new Error(`Proveedor de pago desconocido: ${name}`);
     paymentInstance = factory();

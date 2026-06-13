@@ -59,6 +59,13 @@ export const config = {
   // admin con estas credenciales (no hay contraseñas por defecto en producción).
   adminEmail: str('ADMIN_EMAIL', ''),
   adminPassword: process.env.ADMIN_PASSWORD ?? '',
+
+  // Pagos: proveedor activo y credenciales de Stripe (modo test o producción).
+  paymentProvider: str('PAYMENT_PROVIDER', 'sandbox'),
+  stripeSecretKey: str('STRIPE_SECRET_KEY', ''),
+  stripeWebhookSecret: str('STRIPE_WEBHOOK_SECRET', ''),
+  stripeSuccessUrl: str('STRIPE_SUCCESS_URL', ''),
+  stripeCancelUrl: str('STRIPE_CANCEL_URL', ''),
 } as const;
 
 export const isProd = config.env === 'production';
@@ -81,6 +88,14 @@ export function assertProductionConfig(): void {
   }
   if (!process.env.DATABASE_URL) {
     errors.push('DATABASE_URL debe apuntar a la base de datos PostgreSQL de producción.');
+  }
+  if (config.paymentProvider === 'stripe') {
+    if (!config.stripeSecretKey || !config.stripeWebhookSecret) {
+      errors.push('STRIPE_SECRET_KEY y STRIPE_WEBHOOK_SECRET son obligatorios con PAYMENT_PROVIDER=stripe.');
+    }
+    if (!config.stripeSuccessUrl || !config.stripeCancelUrl) {
+      errors.push('STRIPE_SUCCESS_URL y STRIPE_CANCEL_URL son obligatorios con PAYMENT_PROVIDER=stripe.');
+    }
   }
   if (errors.length > 0) {
     throw new Error('Configuración de producción inválida:\n - ' + errors.join('\n - '));

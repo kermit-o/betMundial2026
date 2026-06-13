@@ -20,11 +20,11 @@ const SANDBOX_WEBHOOK_SECRET = process.env.PAYMENTS_WEBHOOK_SECRET ?? 'sandbox-w
 export class SandboxPaymentProvider implements PaymentProvider {
   readonly name = 'sandbox';
 
-  createDeposit(_req: PaymentRequest): PaymentResult {
+  async createDeposit(_req: PaymentRequest): Promise<PaymentResult> {
     return { providerRef: `pi_${nanoid(12)}`, status: 'completed' };
   }
 
-  createPayout(_req: PaymentRequest): PaymentResult {
+  async createPayout(_req: PaymentRequest): Promise<PaymentResult> {
     return { providerRef: `po_${nanoid(12)}`, status: 'completed' };
   }
 

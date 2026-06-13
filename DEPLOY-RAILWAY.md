@@ -81,6 +81,31 @@ cambiar `ADMIN_PASSWORD` y volver a desplegar).
 > (`admin@betmundial2026.test` / `Admin1234!`), pon `ADMIN_EMAIL=admin@betmundial2026.test`
 > y un `ADMIN_PASSWORD` fuerte, y redespliega: rotará esa misma cuenta.
 
+### 7. Pagos con Stripe (opcional)
+Por defecto el proveedor es `sandbox` (confirma al instante, ideal para demo).
+Para usar Stripe **en modo test**:
+
+1. En Stripe (modo test) copia tu **clave secreta** `sk_test_...`.
+2. Crea un endpoint de webhook apuntando a
+   `https://TU-DOMINIO.up.railway.app/webhooks/payments`, suscrito a
+   `checkout.session.completed` (y `checkout.session.expired`). Copia su
+   **signing secret** `whsec_...`.
+3. Añade variables en Railway:
+
+   | Variable | Valor |
+   |----------|-------|
+   | `PAYMENT_PROVIDER` | `stripe` |
+   | `STRIPE_SECRET_KEY` | `sk_test_...` |
+   | `STRIPE_WEBHOOK_SECRET` | `whsec_...` |
+   | `STRIPE_SUCCESS_URL` | `https://TU-DOMINIO.up.railway.app/?deposit=ok` |
+   | `STRIPE_CANCEL_URL` | `https://TU-DOMINIO.up.railway.app/?deposit=cancel` |
+
+El depósito abre **Stripe Checkout**; al pagar, el webhook firma y abona el saldo.
+
+> ⚠️ Stripe **prohíbe apuestas con dinero real sin licencia de juego** y aprobación
+> previa. Usa claves de test salvo que tengas esa licencia. Los **retiros** quedan
+> en `pending`: el pago real a usuarios requiere Stripe Connect/Treasury.
+
 ---
 
 ## Opción B — Railway CLI

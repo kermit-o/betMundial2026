@@ -107,7 +107,7 @@ export const Api = {
   matches: () => api<{ matches: Match[] }>('/matches'),
 
   wallet: () => api<{ balance: number; transactions: Transaction[]; payments: PaymentIntent[] }>('/wallet'),
-  deposit: (amount: number) => api<{ intent: PaymentIntent; balance: number }>('/wallet/deposit', { method: 'POST', body: JSON.stringify({ amount }) }),
+  deposit: (amount: number) => api<{ intent: PaymentIntent; balance: number; redirectUrl?: string }>('/wallet/deposit', { method: 'POST', body: JSON.stringify({ amount }) }),
   withdraw: (amount: number) => api<{ intent: PaymentIntent; balance: number }>('/wallet/withdraw', { method: 'POST', body: JSON.stringify({ amount }) }),
 
   placeBet: (legs: BetLegInput[], stake: number) =>

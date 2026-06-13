@@ -24,8 +24,8 @@ export interface WebhookEvent {
 
 export interface PaymentProvider {
   readonly name: string;
-  createDeposit(req: PaymentRequest): PaymentResult;
-  createPayout(req: PaymentRequest): PaymentResult;
+  createDeposit(req: PaymentRequest): Promise<PaymentResult>;
+  createPayout(req: PaymentRequest): Promise<PaymentResult>;
   verifyWebhookSignature(rawBody: string, signature: string | undefined): boolean;
   parseWebhook(payload: unknown): WebhookEvent;
 }

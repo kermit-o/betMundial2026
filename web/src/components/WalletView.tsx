@@ -26,10 +26,22 @@ export function WalletView({ profile, balance, onBalanceChange }: { profile: Pro
     const minor = Math.round((parseFloat(amount) || 0) * 100);
     if (minor <= 0) return setMessage('Importe inválido.');
     try {
-      const res = kind === 'deposit' ? await Api.deposit(minor) : await Api.withdraw(minor);
-      onBalanceChange(res.balance);
-      await load();
-      setMessage(kind === 'deposit' ? '✅ Depósito realizado.' : '✅ Retiro solicitado.');
+      if (kind === 'deposit') {
+        const res = await Api.deposit(minor);
+        // Proveedores con checkout externo (Stripe) devuelven una URL de pago.
+        if (res.redirectUrl) {
+          window.location.href = res.redirectUrl;
+          return;
+        }
+        onBalanceChange(res.balance);
+        await load();
+        setMessage('✅ Depósito realizado.');
+      } else {
+        const res = await Api.withdraw(minor);
+        onBalanceChange(res.balance);
+        await load();
+        setMessage('✅ Retiro solicitado.');
+      }
     } catch (err) {
       setMessage(`⛔ ${err instanceof ApiError ? err.message : 'Error'}`);
     }

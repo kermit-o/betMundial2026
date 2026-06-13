@@ -247,8 +247,8 @@ export function buildRouter(db: Db): Router {
     asyncHandler(async (req, res) => {
       const { amount, idempotencyKey } = amountSchema.parse(req.body);
       const key = idempotencyKey ?? (req.headers['idempotency-key'] as string) ?? nanoid();
-      const { intent, balance } = await initiateDeposit(db, await loadUser(db, req), amount, key, ipOf(req));
-      res.status(201).json({ intent, balance });
+      const { intent, balance, redirectUrl } = await initiateDeposit(db, await loadUser(db, req), amount, key, ipOf(req));
+      res.status(201).json({ intent, balance, redirectUrl });
     }),
   );
 
@@ -269,7 +269,8 @@ export function buildRouter(db: Db): Router {
     '/webhooks/payments',
     asyncHandler(async (req, res) => {
       const raw = (req as Request & { rawBody?: string }).rawBody ?? JSON.stringify(req.body);
-      const sig = req.headers['x-signature'] as string | undefined;
+      // Stripe firma en 'stripe-signature'; el sandbox usa 'x-signature'.
+      const sig = (req.headers['stripe-signature'] ?? req.headers['x-signature']) as string | undefined;
       res.json(await handleWebhook(db, raw, sig));
     }),
   );
