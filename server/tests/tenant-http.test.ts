@@ -62,7 +62,8 @@ describe('aislamiento multi-operador (HTTP)', () => {
     const meA = await request(app).get('/api/me').set('Authorization', `Bearer ${token}`).set('X-Operator-Id', 'opA');
     expect(meA.status).toBe(200);
 
+    // El token es de opA pero la petición declara opB => rechazo explícito.
     const meB = await request(app).get('/api/me').set('Authorization', `Bearer ${token}`).set('X-Operator-Id', 'opB');
-    expect(meB.status).toBe(401);
+    expect(meB.status).toBe(403);
   });
 });

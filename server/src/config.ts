@@ -63,6 +63,13 @@ export const config = {
   // Multi-operador (SaaS): operador usado cuando una petición no especifica uno
   // (cabecera X-Operator-Id; Fase 2 resolverá por subdominio).
   defaultOperatorId: str('DEFAULT_OPERATOR_ID', 'op_default'),
+  // Dominio base para resolver el operador por subdominio (casinoA.dominio.com =>
+  // slug "casinoA"). Vacío => se usa cabecera/operador por defecto (un operador).
+  platformBaseDomain: str('PLATFORM_BASE_DOMAIN', ''),
+  // Super-admin de la plataforma (tú): gestiona operadores. Sin valores por
+  // defecto en producción; en desarrollo se usa una cuenta de demostración.
+  platformAdminEmail: str('PLATFORM_ADMIN_EMAIL', ''),
+  platformAdminPassword: process.env.PLATFORM_ADMIN_PASSWORD ?? '',
 
   // Redis (opcional): habilita rate-limit distribuido y difusión de cuotas
   // multi-instancia. Vacío => modo de una sola instancia (memoria).

@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url';
 import type { Db, Executor } from './index.js';
 import { getDb, closeDb } from './index.js';
 import { config } from '../config.js';
+import { ensurePlatformAdmin } from '../platform/platform.service.js';
 import { nowIso } from '../utils/time.js';
 
 interface TeamSeed { code: string; name: string; grp: string }
@@ -37,6 +38,8 @@ export async function seed(db: Db): Promise<void> {
     await seedDemoData(db);
     await ensureAdmin(db);
   });
+  // Super-admin de la plataforma (no pertenece a ningún operador).
+  await db.runAsSystem(() => ensurePlatformAdmin(db));
 }
 
 /** Datos de demostración (equipos, partidos y mercados). Idempotente. */

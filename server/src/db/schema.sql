@@ -225,3 +225,13 @@ END $$;
 -- El email es único POR operador (dos operadores pueden tener el mismo cliente).
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_operator_email ON users(operator_id, email);
+
+-- Super-admins de la PLATAFORMA (dueño del SaaS). No pertenecen a ningún
+-- operador y no llevan RLS: gestionan los operadores desde /api/platform.
+CREATE TABLE IF NOT EXISTS platform_admins (
+  id            TEXT PRIMARY KEY,
+  email         TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  full_name     TEXT NOT NULL,
+  created_at    TEXT NOT NULL
+);

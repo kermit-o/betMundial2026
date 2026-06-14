@@ -118,6 +118,21 @@ export interface AuthUser {
   jurisdiction: string;
 }
 
+export interface PlatformAdmin {
+  id: string;
+  email: string;
+  password_hash: string;
+  full_name: string;
+  created_at: string;
+}
+
+/** Identidad de un super-admin de plataforma (token con scope 'platform'). */
+export interface PlatformAuth {
+  id: string;
+  email: string;
+  scope: 'platform';
+}
+
 /** Error de negocio con código y estado HTTP, distinguible de fallos inesperados. */
 export class AppError extends Error {
   constructor(

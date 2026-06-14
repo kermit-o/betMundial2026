@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Db } from './db/index.js';
 import { buildRouter } from './routes/index.js';
+import { buildPlatformRouter } from './routes/platform.js';
 import { tenantContext } from './middleware/tenant.js';
 import { rateLimit } from './middleware/rateLimit.js';
 import { errorHandler, asyncHandler } from './middleware/error.js';
@@ -81,6 +82,23 @@ export function createApp(db: Db): Express {
     }),
   );
   app.use(rateLimit()); // rate limit global por IP
+
+  // Plataforma (super-admin): contexto de sistema, fuera del aislamiento por
+  // operador. Se registra antes que /api para no entrar en el tenant middleware.
+  app.use(
+    '/api/platform',
+    (_req, res, next) => {
+      db.runAsSystem(
+        () =>
+          new Promise<void>((resolve) => {
+            res.on('finish', resolve);
+            res.on('close', resolve);
+            next();
+          }),
+      ).catch(next);
+    },
+    buildPlatformRouter(db),
+  );
 
   app.use('/api', tenantContext(db), buildRouter(db));
 
