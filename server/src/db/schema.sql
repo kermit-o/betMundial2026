@@ -169,3 +169,59 @@ CREATE TABLE IF NOT EXISTS fraud_flags (
 );
 CREATE INDEX IF NOT EXISTS idx_fraud_user ON fraud_flags(user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_fraud_time ON fraud_flags(created_at);
+
+-- ============================================================================
+-- Multi-operador (SaaS). Registro de operadores (tenants) y aislamiento de datos
+-- por operador mediante Row-Level Security. La columna operator_id se rellena
+-- sola desde la variable de sesión app.operator_id (la fija la app por petición).
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS operators (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  slug        TEXT NOT NULL UNIQUE,
+  status      TEXT NOT NULL DEFAULT 'active',
+  branding    TEXT,                 -- JSON con marca (nombre visible, logo, colores) — Fase 4
+  created_at  TEXT NOT NULL
+);
+
+-- Operador por defecto: alberga los datos de una instalación de un solo operador
+-- y los datos preexistentes al activar el multi-tenant.
+INSERT INTO operators (id, name, slug, status, created_at)
+VALUES ('op_default', 'Operador por defecto', 'default', 'active', '1970-01-01T00:00:00Z')
+ON CONFLICT (id) DO NOTHING;
+
+-- Añade operator_id + RLS a cada tabla con datos de cliente, de forma idempotente.
+DO $$
+DECLARE
+  t text;
+  tables text[] := ARRAY[
+    'users','wallets','transactions','payment_intents','kyc_cases',
+    'auth_tokens','bets','bet_legs','audit_log','fraud_flags'
+  ];
+BEGIN
+  FOREACH t IN ARRAY tables LOOP
+    EXECUTE format('ALTER TABLE %I ADD COLUMN IF NOT EXISTS operator_id text', t);
+    -- Backfill de filas preexistentes al operador por defecto.
+    EXECUTE format('UPDATE %I SET operator_id = %L WHERE operator_id IS NULL', t, 'op_default');
+    EXECUTE format($f$ALTER TABLE %I ALTER COLUMN operator_id SET DEFAULT current_setting('app.operator_id', true)$f$, t);
+    EXECUTE format('ALTER TABLE %I ALTER COLUMN operator_id SET NOT NULL', t);
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_' || t || '_operator') THEN
+      EXECUTE format('ALTER TABLE %I ADD CONSTRAINT fk_%s_operator FOREIGN KEY (operator_id) REFERENCES operators(id)', t, t);
+    END IF;
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%s_operator ON %I(operator_id)', t, t);
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
+    EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON %I', t);
+    EXECUTE format($p$
+      CREATE POLICY tenant_isolation ON %I
+      USING (current_setting('app.operator_id', true) = '__system__'
+             OR operator_id = current_setting('app.operator_id', true))
+      WITH CHECK (current_setting('app.operator_id', true) = '__system__'
+             OR operator_id = current_setting('app.operator_id', true))
+    $p$, t);
+  END LOOP;
+END $$;
+
+-- El email es único POR operador (dos operadores pueden tener el mismo cliente).
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_operator_email ON users(operator_id, email);

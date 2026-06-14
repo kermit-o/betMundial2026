@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Db } from './db/index.js';
 import { buildRouter } from './routes/index.js';
+import { tenantContext } from './middleware/tenant.js';
 import { rateLimit } from './middleware/rateLimit.js';
 import { errorHandler, asyncHandler } from './middleware/error.js';
 import { requestLog } from './middleware/requestLog.js';
@@ -64,7 +65,8 @@ export function createApp(db: Db): Express {
       '/metrics',
       asyncHandler(async (_req, res) => {
         res.setHeader('Content-Type', 'text/plain; version=0.0.4');
-        res.send(await renderMetrics(db));
+        // Métricas agregadas de todos los operadores => contexto de sistema.
+        res.send(await db.runAsSystem(() => renderMetrics(db)));
       }),
     );
   }
@@ -80,7 +82,7 @@ export function createApp(db: Db): Express {
   );
   app.use(rateLimit()); // rate limit global por IP
 
-  app.use('/api', buildRouter(db));
+  app.use('/api', tenantContext(db), buildRouter(db));
 
   // 404 para rutas /api desconocidas (no deben caer en la SPA).
   app.use('/api', (_req, res) => res.status(404).json({ error: { code: 'not_found', message: 'Recurso no encontrado.' } }));

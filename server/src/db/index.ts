@@ -1,10 +1,22 @@
 import pg from 'pg';
 import fs from 'node:fs';
 import path from 'node:path';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { fileURLToPath } from 'node:url';
 import { nanoid } from 'nanoid';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
+
+/**
+ * Contexto de operador por petición. La app fija un cliente con la variable de
+ * sesión app.operator_id; las consultas de ese flujo lo usan y la RLS de
+ * PostgreSQL aísla los datos por operador.
+ */
+interface TenantStore {
+  client: pg.PoolClient;
+  operatorId: string;
+}
+const tenantALS = new AsyncLocalStorage<TenantStore>();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -24,6 +36,10 @@ export interface Executor {
 
 export interface Db extends Executor {
   tx<T>(fn: (e: Executor) => Promise<T>): Promise<T>;
+  /** Ejecuta fn con el contexto de un operador (RLS lo aísla). */
+  runWithContext<T>(operatorId: string, fn: () => Promise<T>): Promise<T>;
+  /** Ejecuta fn como sistema (ve/escribe en todos los operadores). */
+  runAsSystem<T>(fn: () => Promise<T>): Promise<T>;
   close(): Promise<void>;
 }
 
@@ -45,17 +61,28 @@ function makeExecutor(run: RunFn): Executor {
 }
 
 class PgDb implements Db {
-  private exec: Executor;
-  constructor(private pool: pg.Pool) {
-    this.exec = makeExecutor((sql, params) => this.pool.query(sql, params as unknown[]));
+  constructor(private pool: pg.Pool) {}
+
+  /** Enruta cada consulta al cliente del operador actual o al pool si no hay contexto. */
+  private exec(): Executor {
+    const store = tenantALS.getStore();
+    const run: RunFn = store
+      ? (sql, params) => store.client.query(sql, params as unknown[])
+      : (sql, params) => this.pool.query(sql, params as unknown[]);
+    return makeExecutor(run);
   }
-  query<T>(sql: string, params?: unknown[]) { return this.exec.query<T>(sql, params); }
-  oneOrNone<T>(sql: string, params?: unknown[]) { return this.exec.oneOrNone<T>(sql, params); }
-  none(sql: string, params?: unknown[]) { return this.exec.none(sql, params); }
+
+  query<T>(sql: string, params?: unknown[]) { return this.exec().query<T>(sql, params); }
+  oneOrNone<T>(sql: string, params?: unknown[]) { return this.exec().oneOrNone<T>(sql, params); }
+  none(sql: string, params?: unknown[]) { return this.exec().none(sql, params); }
 
   async tx<T>(fn: (e: Executor) => Promise<T>): Promise<T> {
+    // Cada transacción usa su propio cliente (concurrencia), fijando el operador
+    // del contexto actual para que la RLS aplique también dentro de la tx.
+    const store = tenantALS.getStore();
     const client = await this.pool.connect();
     try {
+      if (store) await client.query(`SELECT set_config('app.operator_id', $1, false)`, [store.operatorId]);
       await client.query('BEGIN');
       const exec = makeExecutor((sql, params) => client.query(sql, params as unknown[]));
       const result = await fn(exec);
@@ -65,8 +92,26 @@ class PgDb implements Db {
       await client.query('ROLLBACK');
       throw err;
     } finally {
+      if (store) {
+        try { await client.query('RESET app.operator_id'); } catch { /* noop */ }
+      }
       client.release();
     }
+  }
+
+  async runWithContext<T>(operatorId: string, fn: () => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query(`SELECT set_config('app.operator_id', $1, false)`, [operatorId]);
+      return await tenantALS.run({ client, operatorId }, fn);
+    } finally {
+      try { await client.query('RESET app.operator_id'); } catch { /* noop */ }
+      client.release();
+    }
+  }
+
+  runAsSystem<T>(fn: () => Promise<T>): Promise<T> {
+    return this.runWithContext('__system__', fn);
   }
 
   async close() { await this.pool.end(); }
@@ -74,9 +119,9 @@ class PgDb implements Db {
 
 let instance: PgDb | null = null;
 
-/** Aplica el esquema de forma idempotente. */
+/** Aplica el esquema de forma idempotente (como sistema: crea RLS y backfill). */
 export async function applySchema(db: Db): Promise<void> {
-  await db.none(SCHEMA_SQL);
+  await db.runAsSystem(() => db.none(SCHEMA_SQL));
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -128,7 +173,9 @@ export async function createTestDb(): Promise<Db> {
   const pool = new pg.Pool({
     connectionString: config.databaseUrl,
     max: 4,
-    options: `-c search_path=${schema}`,
+    // Cada conexión arranca en el esquema de prueba y bajo el operador por defecto,
+    // de modo que las inserciones directas de los tests se escopan a op_default.
+    options: `-c search_path=${schema} -c app.operator_id=op_default`,
   });
   const db = new PgDb(pool);
   await applySchema(db);

@@ -31,8 +31,12 @@ function priceFromProb(p: number, margin = 0.07): number {
 }
 
 export async function seed(db: Db): Promise<void> {
-  await seedDemoData(db);
-  await ensureAdmin(db);
+  // Los datos sembrados pertenecen al operador por defecto (instalación de un solo
+  // operador). La gestión de más operadores llegará con el panel de super-admin.
+  await db.runWithContext('op_default', async () => {
+    await seedDemoData(db);
+    await ensureAdmin(db);
+  });
 }
 
 /** Datos de demostración (equipos, partidos y mercados). Idempotente. */

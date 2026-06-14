@@ -3,6 +3,7 @@ export type KycStatus = 'pending' | 'verified' | 'rejected';
 
 export interface User {
   id: string;
+  operator_id: string;
   email: string;
   password_hash: string;
   full_name: string;
@@ -111,6 +112,7 @@ export interface PaymentIntent {
 
 export interface AuthUser {
   id: string;
+  operator_id: string;
   email: string;
   role: Role;
   jurisdiction: string;

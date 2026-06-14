@@ -60,6 +60,10 @@ export const config = {
   adminEmail: str('ADMIN_EMAIL', ''),
   adminPassword: process.env.ADMIN_PASSWORD ?? '',
 
+  // Multi-operador (SaaS): operador usado cuando una petición no especifica uno
+  // (cabecera X-Operator-Id; Fase 2 resolverá por subdominio).
+  defaultOperatorId: str('DEFAULT_OPERATOR_ID', 'op_default'),
+
   // Redis (opcional): habilita rate-limit distribuido y difusión de cuotas
   // multi-instancia. Vacío => modo de una sola instancia (memoria).
   redisUrl: str('REDIS_URL', ''),

@@ -22,7 +22,12 @@ export interface RegisterInput {
 
 const BCRYPT_ROUNDS = 10;
 
-export async function register(db: Db, input: RegisterInput, ip: string | null): Promise<{ user: User; token: string }> {
+export async function register(
+  db: Db,
+  input: RegisterInput,
+  ip: string | null,
+  operatorId: string,
+): Promise<{ user: User; token: string }> {
   const jurisdiction = input.jurisdiction.toUpperCase();
 
   // --- Cumplimiento: jurisdicción, edad, términos ---
@@ -43,6 +48,7 @@ export async function register(db: Db, input: RegisterInput, ip: string | null):
   const now = nowIso();
   const user: User = {
     id: nanoid(),
+    operator_id: operatorId,
     email: input.email.toLowerCase(),
     password_hash: bcrypt.hashSync(input.password, BCRYPT_ROUNDS),
     full_name: input.fullName,
@@ -106,6 +112,7 @@ export async function login(
 export function issueToken(user: User): string {
   const payload: AuthUser = {
     id: user.id,
+    operator_id: user.operator_id,
     email: user.email,
     role: user.role,
     jurisdiction: user.jurisdiction,
@@ -116,7 +123,13 @@ export function issueToken(user: User): string {
 export function verifyToken(token: string): AuthUser {
   try {
     const decoded = jwt.verify(token, config.jwtSecret) as jwt.JwtPayload & AuthUser;
-    return { id: decoded.id, email: decoded.email, role: decoded.role, jurisdiction: decoded.jurisdiction };
+    return {
+      id: decoded.id,
+      operator_id: decoded.operator_id,
+      email: decoded.email,
+      role: decoded.role,
+      jurisdiction: decoded.jurisdiction,
+    };
   } catch {
     throw new AppError(401, 'invalid_token', 'Sesión inválida o expirada.');
   }

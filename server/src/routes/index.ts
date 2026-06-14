@@ -79,7 +79,7 @@ export function buildRouter(db: Db): Router {
     rateLimit(10, 'auth'),
     asyncHandler(async (req, res) => {
       const input = registerSchema.parse(req.body);
-      const { user, token } = await register(db, input, ipOf(req));
+      const { user, token } = await register(db, input, ipOf(req), req.operatorId!);
       res.status(201).json({ token, user: publicProfile(user) });
     }),
   );

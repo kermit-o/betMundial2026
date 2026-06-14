@@ -11,6 +11,7 @@ export async function makeUser(db: Db, overrides: Partial<User> = {}): Promise<U
   const now = new Date().toISOString();
   const user: User = {
     id: nanoid(),
+    operator_id: 'op_default',
     email: `${nanoid(6)}@test.com`,
     password_hash: bcrypt.hashSync('Password1!', 8),
     full_name: 'Juan Pérez',
