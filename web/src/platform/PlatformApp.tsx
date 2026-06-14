@@ -5,6 +5,8 @@ import {
   getPlatformToken,
   setPlatformToken,
   clearPlatformToken,
+  parseBranding,
+  type Branding,
   type Operator,
 } from './api.js';
 
@@ -72,6 +74,7 @@ function PlatformDashboard({ onLogout }: { onLogout: () => void }) {
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<Operator | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -172,12 +175,14 @@ function PlatformDashboard({ onLogout }: { onLogout: () => void }) {
                   <td><span className={`badge ${o.status === 'active' ? 'won' : 'lost'}`}>{o.status}</span></td>
                   <td className="mono">{o.created_at.slice(0, 10)}</td>
                   <td>
-                    {o.id === 'op_default' ? (
-                      <span className="muted small">—</span>
-                    ) : (
-                      <button className="link" onClick={() => toggle(o)}>
-                        {o.status === 'active' ? 'Suspender' : 'Activar'}
-                      </button>
+                    <button className="link" onClick={() => setEditing(o)}>Marca</button>
+                    {o.id !== 'op_default' && (
+                      <>
+                        {' · '}
+                        <button className="link" onClick={() => toggle(o)}>
+                          {o.status === 'active' ? 'Suspender' : 'Activar'}
+                        </button>
+                      </>
                     )}
                   </td>
                 </tr>
@@ -185,8 +190,71 @@ function PlatformDashboard({ onLogout }: { onLogout: () => void }) {
               {operators.length === 0 && <tr><td colSpan={5} className="muted">Sin operadores.</td></tr>}
             </tbody>
           </table>
+
+          {editing && (
+            <BrandingEditor
+              operator={editing}
+              onClose={() => setEditing(null)}
+              onSaved={async () => {
+                setEditing(null);
+                setMsg('✅ Marca guardada.');
+                await load();
+              }}
+            />
+          )}
         </div>
       </main>
+    </div>
+  );
+}
+
+function BrandingEditor({ operator, onClose, onSaved }: { operator: Operator; onClose: () => void; onSaved: () => void }) {
+  const [b, setB] = useState<Branding>(() => {
+    const parsed = parseBranding(operator.branding);
+    return { ...parsed, displayName: parsed.displayName || operator.name };
+  });
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setMsg('');
+    try {
+      await PlatformApi.updateBranding(operator.id, b);
+      onSaved();
+    } catch (err) {
+      setMsg(`⛔ ${err instanceof PlatformApiError ? err.message : 'Error'}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="panel" style={{ marginTop: 16, background: 'var(--bg-2)' }}>
+      <h3>Marca de {operator.name}</h3>
+      <form onSubmit={save}>
+        <div className="row" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <label>Nombre visible<input value={b.displayName} maxLength={40} onChange={(e) => setB({ ...b, displayName: e.target.value })} required /></label>
+          <label>Color principal<input type="color" value={b.primaryColor} onChange={(e) => setB({ ...b, primaryColor: e.target.value })} /></label>
+          <label>Lema<input value={b.tagline} maxLength={80} onChange={(e) => setB({ ...b, tagline: e.target.value })} placeholder="Tu casa de apuestas" /></label>
+          <label style={{ flex: 1, minWidth: 220 }}>Logo (URL)<input value={b.logoUrl ?? ''} onChange={(e) => setB({ ...b, logoUrl: e.target.value || null })} placeholder="https://…/logo.png" /></label>
+        </div>
+
+        {/* Vista previa de la cabecera del operador */}
+        <div className="brand-preview" style={{ borderColor: b.primaryColor }}>
+          <span className="brand">
+            {b.logoUrl ? <img src={b.logoUrl} alt="" className="brand-logo" /> : '⚽'} {b.displayName || operator.name}
+          </span>
+          <button type="button" className="primary" style={{ background: b.primaryColor, borderColor: b.primaryColor }}>Apostar</button>
+        </div>
+
+        {msg && <div className="slip-message">{msg}</div>}
+        <div className="row" style={{ marginTop: 12 }}>
+          <button className="primary" type="submit" disabled={busy}>{busy ? 'Guardando…' : 'Guardar marca'}</button>
+          <button type="button" className="ghost" onClick={onClose}>Cancelar</button>
+        </div>
+      </form>
     </div>
   );
 }

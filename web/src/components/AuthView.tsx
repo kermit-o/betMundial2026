@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Api, ApiError, setToken } from '../api.js';
+import { Api, ApiError, setToken, type Branding } from '../api.js';
 
 type Mode = 'login' | 'register' | 'forgot' | 'reset';
 
-export function AuthView({ onAuth }: { onAuth: () => void }) {
+export function AuthView({ onAuth, branding }: { onAuth: () => void; branding?: Branding | null }) {
   const [mode, setMode] = useState<Mode>('login');
   const [jurisdictions, setJurisdictions] = useState<Array<{ code: string; name: string }>>([]);
   const [error, setError] = useState('');
@@ -67,8 +67,10 @@ export function AuthView({ onAuth }: { onAuth: () => void }) {
   return (
     <div className="auth-wrap">
       <div className="auth-card">
-        <h1>⚽ Bet Mundial 2026</h1>
-        <p className="muted">Apuestas deportivas — Copa Mundial 2026</p>
+        <h1>
+          {branding?.logoUrl ? <img src={branding.logoUrl} alt="" className="brand-logo" /> : '⚽'} {branding?.displayName ?? 'Bet Mundial 2026'}
+        </h1>
+        <p className="muted">{branding?.tagline || 'Apuestas deportivas — Copa Mundial 2026'}</p>
 
         {(mode === 'login' || mode === 'register') && (
           <div className="seg">

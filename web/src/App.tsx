@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Api, clearToken, getToken, type Profile } from './api.js';
+import { Api, clearToken, getToken, type Branding, type Profile } from './api.js';
 import { AuthView } from './components/AuthView.js';
 import { MatchesView } from './components/MatchesView.js';
 import { WalletView } from './components/WalletView.js';
@@ -10,11 +10,27 @@ import { RealityCheck } from './components/RealityCheck.js';
 
 type Tab = 'matches' | 'wallet' | 'bets' | 'account' | 'admin';
 
+/** Aplica la marca del operador: color principal y título de la pestaña. */
+function applyBranding(b: Branding): void {
+  document.documentElement.style.setProperty('--primary', b.primaryColor);
+  document.title = b.displayName;
+}
+
 export function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [balance, setBalance] = useState(0);
   const [tab, setTab] = useState<Tab>('matches');
   const [loading, setLoading] = useState(true);
+  const [branding, setBranding] = useState<Branding | null>(null);
+
+  useEffect(() => {
+    Api.branding()
+      .then((b) => {
+        setBranding(b);
+        applyBranding(b);
+      })
+      .catch(() => {});
+  }, []);
 
   const refreshMe = useCallback(async () => {
     try {
@@ -39,14 +55,17 @@ export function App() {
   }
 
   if (loading) return <div className="centered">Cargando…</div>;
-  if (!profile) return <AuthView onAuth={() => refreshMe()} />;
+  if (!profile) return <AuthView onAuth={() => refreshMe()} branding={branding} />;
 
   const isAdmin = profile.role === 'admin';
+  const brandName = branding?.displayName ?? 'Bet Mundial 2026';
 
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand">⚽ Bet Mundial 2026</div>
+        <div className="brand">
+          {branding?.logoUrl ? <img src={branding.logoUrl} alt="" className="brand-logo" /> : '⚽'} {brandName}
+        </div>
         <nav className="tabs">
           <button className={tab === 'matches' ? 'active' : ''} onClick={() => setTab('matches')}>Partidos</button>
           <button className={tab === 'bets' ? 'active' : ''} onClick={() => setTab('bets')}>Mis apuestas</button>

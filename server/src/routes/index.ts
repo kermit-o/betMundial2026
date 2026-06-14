@@ -55,6 +55,7 @@ import {
   adminStats,
 } from '../admin/admin.service.js';
 import { listAllowedJurisdictions } from '../compliance/jurisdictions.js';
+import { getBranding } from '../platform/platform.service.js';
 import type { User } from '../types.js';
 
 function ipOf(req: Request): string | null {
@@ -72,6 +73,10 @@ export function buildRouter(db: Db): Router {
   // --- Salud / metadatos ---
   r.get('/health', (_req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
   r.get('/jurisdictions', (_req, res) => res.json({ jurisdictions: listAllowedJurisdictions() }));
+  // Marca blanca del operador actual (pública: la usa el frontend antes del login).
+  r.get('/branding', asyncHandler(async (req, res) => {
+    res.json(await getBranding(db, req.operatorId!));
+  }));
 
   // --- Auth ---
   r.post(

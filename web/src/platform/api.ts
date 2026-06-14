@@ -7,6 +7,35 @@ export interface Operator {
   created_at: string;
 }
 
+export interface Branding {
+  displayName: string;
+  primaryColor: string;
+  logoUrl: string | null;
+  tagline: string;
+}
+
+export const DEFAULT_BRANDING: Branding = {
+  displayName: '',
+  primaryColor: '#16c784',
+  logoUrl: null,
+  tagline: '',
+};
+
+export function parseBranding(raw: string | null): Branding {
+  if (!raw) return { ...DEFAULT_BRANDING };
+  try {
+    const b = JSON.parse(raw) as Partial<Branding>;
+    return {
+      displayName: b.displayName ?? '',
+      primaryColor: b.primaryColor ?? DEFAULT_BRANDING.primaryColor,
+      logoUrl: b.logoUrl ?? null,
+      tagline: b.tagline ?? '',
+    };
+  } catch {
+    return { ...DEFAULT_BRANDING };
+  }
+}
+
 const PLATFORM_TOKEN_KEY = 'platform_token';
 export const getPlatformToken = () => localStorage.getItem(PLATFORM_TOKEN_KEY);
 export const setPlatformToken = (t: string) => localStorage.setItem(PLATFORM_TOKEN_KEY, t);
@@ -40,4 +69,14 @@ export const PlatformApi = {
     papi<{ operator: Operator }>('/operators', { method: 'POST', body: JSON.stringify({ name, slug }) }),
   setStatus: (id: string, status: 'active' | 'suspended') =>
     papi<{ operator: Operator }>(`/operators/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+  updateBranding: (id: string, branding: Branding) =>
+    papi<{ operator: Operator }>(`/operators/${id}/branding`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        displayName: branding.displayName,
+        primaryColor: branding.primaryColor,
+        logoUrl: branding.logoUrl || null,
+        tagline: branding.tagline,
+      }),
+    }),
 };

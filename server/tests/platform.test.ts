@@ -92,6 +92,33 @@ describe('plataforma (super-admin)', () => {
     expect(missing.status).toBe(404);
   });
 
+  it('marca blanca: por defecto y personalizada por operador', async () => {
+    const def = await request(app).get('/api/branding').set('X-Operator-Id', 'op_default');
+    expect(def.status).toBe(200);
+    expect(def.body.displayName).toBeTruthy();
+
+    const create = await request(app).post('/api/platform/operators').set('Authorization', `Bearer ${token}`).send({ name: 'Marca Test', slug: 'marca-test' });
+    const opId = create.body.operator.id as string;
+
+    const put = await request(app)
+      .put(`/api/platform/operators/${opId}/branding`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ displayName: 'Casino Estrella', primaryColor: '#ff0066', tagline: 'La mejor cuota' });
+    expect(put.status).toBe(200);
+
+    // El frontend de ESE operador ve su marca; otro operador, no.
+    const branded = await request(app).get('/api/branding').set('X-Operator-Id', opId);
+    expect(branded.body.displayName).toBe('Casino Estrella');
+    expect(branded.body.primaryColor).toBe('#ff0066');
+
+    const other = await request(app).get('/api/branding').set('X-Operator-Id', 'op_default');
+    expect(other.body.displayName).not.toBe('Casino Estrella');
+
+    // Color inválido => 400.
+    const bad = await request(app).put(`/api/platform/operators/${opId}/branding`).set('Authorization', `Bearer ${token}`).send({ displayName: 'X', primaryColor: 'rojo' });
+    expect(bad.status).toBe(400);
+  });
+
   it('un token de usuario de operador no sirve para la plataforma', async () => {
     const register = await request(app).post('/api/auth/register').set('X-Operator-Id', 'op_default').send({ email: 'normal@x.com', ...reg });
     const userToken = register.body.token as string;

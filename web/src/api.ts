@@ -94,7 +94,15 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 export interface BetLegInput { selectionId: string; expectedOdds: number }
 
+export interface Branding {
+  displayName: string;
+  primaryColor: string;
+  logoUrl: string | null;
+  tagline: string;
+}
+
 export const Api = {
+  branding: () => api<Branding>('/branding'),
   jurisdictions: () => api<{ jurisdictions: Array<{ code: string; name: string; minAge: number; currency: string }> }>('/jurisdictions'),
   register: (data: unknown) => api<{ token: string; user: Profile }>('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
   login: (data: unknown) => api<{ token: string; user: Profile }>('/auth/login', { method: 'POST', body: JSON.stringify(data) }),

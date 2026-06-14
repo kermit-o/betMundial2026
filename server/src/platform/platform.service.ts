@@ -122,3 +122,48 @@ export async function setOperatorStatus(db: Db, id: string, status: 'active' | '
   if (!op) throw new AppError(404, 'operator_not_found', 'Operador no encontrado.');
   return op;
 }
+
+/** Marca blanca de un operador (lo que ve el frontend de su sitio). */
+export interface Branding {
+  displayName: string;
+  primaryColor: string;
+  logoUrl: string | null;
+  tagline: string;
+}
+
+const DEFAULT_BRANDING: Branding = {
+  displayName: 'Bet Mundial 2026',
+  primaryColor: '#16c784',
+  logoUrl: null,
+  tagline: 'Apuestas deportivas — Copa Mundial 2026',
+};
+
+export function parseBranding(raw: string | null): Branding {
+  if (!raw) return { ...DEFAULT_BRANDING };
+  try {
+    const b = JSON.parse(raw) as Partial<Branding>;
+    return {
+      displayName: b.displayName || DEFAULT_BRANDING.displayName,
+      primaryColor: b.primaryColor || DEFAULT_BRANDING.primaryColor,
+      logoUrl: b.logoUrl || null,
+      tagline: b.tagline || DEFAULT_BRANDING.tagline,
+    };
+  } catch {
+    return { ...DEFAULT_BRANDING };
+  }
+}
+
+/** Marca pública del operador actual (la usa el frontend de su sitio). */
+export async function getBranding(db: Executor, operatorId: string): Promise<Branding> {
+  const op = await db.oneOrNone<{ branding: string | null }>(`SELECT branding FROM operators WHERE id = $1`, [operatorId]);
+  return parseBranding(op?.branding ?? null);
+}
+
+export async function updateOperatorBranding(db: Db, id: string, branding: Branding): Promise<Operator> {
+  const op = await db.oneOrNone<Operator>(
+    `UPDATE operators SET branding = $2 WHERE id = $1 RETURNING *`,
+    [id, JSON.stringify(branding)],
+  );
+  if (!op) throw new AppError(404, 'operator_not_found', 'Operador no encontrado.');
+  return op;
+}
