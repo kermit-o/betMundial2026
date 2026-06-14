@@ -113,3 +113,12 @@ export async function createOperator(db: Db, name: string, slug: string): Promis
 export async function findOperatorBySlug(db: Executor, slug: string): Promise<Operator | undefined> {
   return db.oneOrNone<Operator>(`SELECT * FROM operators WHERE slug = $1`, [slug.toLowerCase()]);
 }
+
+export async function setOperatorStatus(db: Db, id: string, status: 'active' | 'suspended'): Promise<Operator> {
+  const op = await db.oneOrNone<Operator>(
+    `UPDATE operators SET status = $2 WHERE id = $1 RETURNING *`,
+    [id, status],
+  );
+  if (!op) throw new AppError(404, 'operator_not_found', 'Operador no encontrado.');
+  return op;
+}

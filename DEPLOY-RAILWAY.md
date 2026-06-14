@@ -123,6 +123,23 @@ Con `REDIS_URL` definida, automáticamente:
 
 Sin `REDIS_URL` todo sigue funcionando en modo de una sola instancia.
 
+### 9. Multi-operador (SaaS) y panel de super-admin
+La plataforma es multi-operador: cada operador (tenant) tiene sus datos aislados
+por Row-Level Security. Variables relevantes:
+
+| Variable | Valor |
+|----------|-------|
+| `DEFAULT_OPERATOR_ID` | `op_default` (instalación de un operador) |
+| `PLATFORM_BASE_DOMAIN` | `midominio.com` para resolver operadores por subdominio |
+| `PLATFORM_ADMIN_EMAIL` / `PLATFORM_ADMIN_PASSWORD` | super-admin de la plataforma |
+
+- **Panel de super-admin**: `https://TU-DOMINIO/platform` (login propio con
+  `PLATFORM_ADMIN_*`). Permite crear/suspender operadores.
+- Con `PLATFORM_BASE_DOMAIN`, cada operador se sirve en `su-slug.midominio.com`
+  (configura un dominio comodín `*.midominio.com` en Railway → Networking).
+- Al desplegar sobre una BD existente, los datos actuales se asignan
+  automáticamente a `op_default` (no se pierde nada).
+
 ---
 
 ## Opción B — Railway CLI

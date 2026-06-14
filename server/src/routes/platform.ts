@@ -4,10 +4,11 @@ import type { Db } from '../db/index.js';
 import { asyncHandler } from '../middleware/error.js';
 import { requireSuperAdmin } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
-import { platformLogin, listOperators, createOperator } from '../platform/platform.service.js';
+import { platformLogin, listOperators, createOperator, setOperatorStatus } from '../platform/platform.service.js';
 
 const loginSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
 const createOperatorSchema = z.object({ name: z.string().min(1).max(80), slug: z.string().min(3).max(32) });
+const updateOperatorSchema = z.object({ status: z.enum(['active', 'suspended']) });
 
 /**
  * Rutas de plataforma (super-admin). Se montan con contexto de sistema, de modo
@@ -40,6 +41,15 @@ export function buildPlatformRouter(db: Db): Router {
     asyncHandler(async (req, res) => {
       const { name, slug } = createOperatorSchema.parse(req.body);
       res.status(201).json({ operator: await createOperator(db, name, slug) });
+    }),
+  );
+
+  r.patch(
+    '/operators/:id',
+    requireSuperAdmin,
+    asyncHandler(async (req, res) => {
+      const { status } = updateOperatorSchema.parse(req.body);
+      res.json({ operator: await setOperatorStatus(db, req.params.id, status) });
     }),
   );
 

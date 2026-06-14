@@ -73,6 +73,25 @@ describe('plataforma (super-admin)', () => {
     expect(dup.status).toBe(409);
   });
 
+  it('suspende y reactiva un operador', async () => {
+    const create = await request(app)
+      .post('/api/platform/operators')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Casino Temporal', slug: 'casino-temporal' });
+    const opId = create.body.operator.id as string;
+
+    const suspend = await request(app).patch(`/api/platform/operators/${opId}`).set('Authorization', `Bearer ${token}`).send({ status: 'suspended' });
+    expect(suspend.status).toBe(200);
+    expect(suspend.body.operator.status).toBe('suspended');
+
+    const activate = await request(app).patch(`/api/platform/operators/${opId}`).set('Authorization', `Bearer ${token}`).send({ status: 'active' });
+    expect(activate.body.operator.status).toBe('active');
+
+    // Operador inexistente => 404.
+    const missing = await request(app).patch('/api/platform/operators/op_nope').set('Authorization', `Bearer ${token}`).send({ status: 'suspended' });
+    expect(missing.status).toBe(404);
+  });
+
   it('un token de usuario de operador no sirve para la plataforma', async () => {
     const register = await request(app).post('/api/auth/register').set('X-Operator-Id', 'op_default').send({ email: 'normal@x.com', ...reg });
     const userToken = register.body.token as string;
